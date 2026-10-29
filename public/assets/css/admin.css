@@ -63,8 +63,7 @@ p { margin: 0; }
 .login { padding: 48px 20px 32px; }
 .login .brand { width: 150px; margin-bottom: 36px; color: #363635; }
 .login .brand svg { display: block; width: 100%; height: auto; }
-.login h2 { font-size: 28px; margin-bottom: 8px; }
-.login .sub { color: var(--ink-2); margin-bottom: 32px; }
+.login h2 { font-size: 28px; margin-bottom: 32px; }
 
 /* 입력 */
 .field { margin-bottom: 26px; }
@@ -313,7 +312,7 @@ details.more .in { padding: 0 16px 6px; }
   .login-card { display: grid; grid-template-columns: 1fr 1fr; max-width: 940px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 24px; overflow: hidden; box-shadow: 0 24px 60px rgba(30,40,55,.08); }
   .login-brand { background: var(--brand-bg); display: grid; place-items: center; padding: 56px; border-right: 1px solid var(--line); }
   .login-brand .brand { width: 230px; margin: 0; }
-  .login-main { padding: 56px 52px 44px; }
+  .login-main { padding: 56px 52px; }
 
   /* 첫 화면 */
   .hello { padding: 0 0 22px; }

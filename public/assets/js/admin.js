@@ -511,7 +511,6 @@
       '<div class="login-brand"><div class="brand">' + ((window.SITE_LOGO && window.SITE_LOGO.stacked) || I.lock) + '</div></div>' +
       '<div class="login-main">' +
       '<h2>관리화면</h2>' +
-      '<p class="sub">상담·고객·견적·계약과 홈페이지를 관리하는 곳이에요.</p>' +
       (msg ? '<div class="error-msg">' + esc(msg) + '</div>' : '') +
       '<form id="login-form" novalidate>' +
       '<div class="field"><label for="email">이메일</label><input class="input" id="email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" value="' + esc(last) + '" required></div>' +
@@ -519,7 +518,6 @@
       '<button class="btn btn-primary" type="submit">들어가기</button>' +
       (DB.live ? '' : '<p class="hint" style="text-align:center;margin-top:16px">데모 화면이라 아무 값이나 넣고 눌러도 들어가져요.</p>') +
       '</form>' +
-      '<p class="hint" style="text-align:center;margin-top:28px">한 번 들어가면 이 기기에서는 계속 로그인된 상태로 유지돼요.</p>' +
       '</div></div></div>';
     if (msg) setTimeout(function () { var f = last ? $('#pw') : $('#email'); if (f) f.focus(); }, 50);
     $('#pw-toggle').addEventListener('click', function () {
