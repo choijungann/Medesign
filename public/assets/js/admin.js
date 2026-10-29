@@ -513,7 +513,7 @@
       '<h2>관리화면</h2>' +
       (msg ? '<div class="error-msg">' + esc(msg) + '</div>' : '') +
       '<form id="login-form" novalidate>' +
-      '<div class="field"><label for="email">이메일</label><input class="input" id="email" type="email" inputmode="email" autocomplete="username" autocapitalize="off" value="' + esc(last) + '" required></div>' +
+      '<div class="field"><label for="email">이메일</label><input class="input" id="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="' + esc(last) + '" required></div>' +
       '<div class="field"><label for="pw">비밀번호</label><div class="pw-wrap"><input class="input" id="pw" type="password" autocomplete="current-password" required><button type="button" id="pw-toggle">보기</button></div></div>' +
       '<button class="btn btn-primary" type="submit">들어가기</button>' +
       (DB.live ? '' : '<p class="hint" style="text-align:center;margin-top:16px">데모 화면이라 아무 값이나 넣고 눌러도 들어가져요.</p>') +
