@@ -415,8 +415,13 @@ ul.promise { margin: 0; padding: 0; }
 .info-table { width: 100%; border-collapse: collapse; border-top: 1px solid var(--ink); font-size: 16px; }
 .info-table th, .info-table td { text-align: left; padding: 16px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .info-table th { width: 140px; font-weight: 500; color: var(--ink-3); }
-.addr-link { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 4px; }
-.addr-link:hover { text-decoration-color: currentColor; }
+.copy-row { display: flex; align-items: flex-start; gap: 12px; }
+.copy-row > span { min-width: 0; }
+.copy-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 27px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 40px; background: var(--surface); font-size: 13px; font-weight: 500; line-height: 1; color: var(--ink-2); white-space: nowrap; transition: border-color .15s, color .15s, background .15s; }
+.copy-btn svg { width: 14px; height: 14px; flex: none; }
+.copy-btn:hover { border-color: var(--ink); color: var(--ink); }
+.copy-btn.done { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 479px) { .info-table th { width: 120px; } }   /* 폰: 이름 칸을 줄여 주소가 덜 꺾이게 ('사업자등록번호'가 한 줄에 들어가는 폭) */
 .map-box { display: grid; gap: 24px; }
 @media (min-width: 900px) { .map-box { grid-template-columns: 1fr 1fr; gap: 64px; } }
 
