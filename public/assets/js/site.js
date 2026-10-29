@@ -7,6 +7,10 @@
   var DB = window.DB;
   var body = document.body;
   var PAGE = body.getAttribute('data-page') || '';
+  // 페이지 주소는 .html 없이 (/about, /work?id=…) — Netlify 가 about.html 을 /about 으로 보여 줌.
+  // 미리보기(그냥 파일로 여는 곳)에서만 EXT 를 '.html' 로 바꿔 씀.
+  var EXT = '';
+  function pg(name) { return name === 'index' ? (EXT ? 'index' + EXT : './') : name + EXT; }
 
   /* ---------- 아이콘 ---------- */
   var I = {
@@ -117,10 +121,10 @@
 
   /* ---------- 공통: 헤더 · 메뉴 · 푸터 · 상담 버튼 ---------- */
   var NAV = [
-    ['works.html', '시공사례', 'works'],
-    ['process.html', '시공과정', 'process'],
-    ['reviews.html', '고객후기', 'reviews'],
-    ['about.html', '회사소개', 'about'],
+    [pg('works'), '시공사례', 'works'],
+    [pg('process'), '시공과정', 'process'],
+    [pg('reviews'), '고객후기', 'reviews'],
+    [pg('about'), '회사소개', 'about'],
   ];
   function navCurrent(key) { return (PAGE === key || (PAGE === 'work' && key === 'works')) ? ' aria-current="page"' : ''; }
   /** 로고 SVG (logo.js) — 글자색(currentColor)을 따라가므로 히어로 위에서는 흰색, 스크롤하면 진한색 */
@@ -131,7 +135,7 @@
   }
   function logoHtml() {
     var svg = logoSvg('horizontal');
-    return '<a class="logo" href="index.html" aria-label="' + esc(C.name) + ' 처음 화면">' + (svg || '<b>' + esc(C.name) + '</b>') + '</a>';
+    return '<a class="logo" href="' + pg('index') + '" aria-label="' + esc(C.name) + ' 처음 화면">' + (svg || '<b>' + esc(C.name) + '</b>') + '</a>';
   }
 
   function renderChrome() {
@@ -150,7 +154,7 @@
         (C.blogUrl ? '<a class="ext" href="' + esc(C.blogUrl) + '" target="_blank" rel="noopener">블로그' + I.ext + '</a>' : '') +
         '</nav>' +
         '<a class="header-tel tel-only" href="' + tel() + '">' + I.phone + esc(C.phone) + '</a>' +
-        '<a class="header-cta inq-only" href="contact.html"' + (PAGE === 'contact' ? ' aria-current="page"' : '') + '>상담 신청</a>' +
+        '<a class="header-cta inq-only" href="' + pg('contact') + '"' + (PAGE === 'contact' ? ' aria-current="page"' : '') + '>상담 신청</a>' +
         '<button class="menu-btn" type="button" aria-label="메뉴 열기" aria-expanded="false">' + I.menu + '</button>' +
         '</div>';
     }
@@ -165,7 +169,7 @@
       '<ul>' + NAV.map(function (n) { return '<li><a href="' + n[0] + '">' + n[1] + I.arrow + '</a></li>'; }).join('') +
       // 상담 신청은 아래 큰 버튼(mnav-cta)으로만 — 목록에 같은 메뉴를 두 번 두지 않음
       (C.blogUrl ? '<li><a href="' + esc(C.blogUrl) + '" target="_blank" rel="noopener">네이버 블로그' + I.ext + '</a></li>' : '') + '</ul>' +
-      '<div class="mnav-cta"><a class="btn btn-dark btn-go inq-only" href="contact.html"><span class="go-txt">' + I.form + '상담 신청</span><span class="go">' + I.arrow + '</span></a>' +
+      '<div class="mnav-cta"><a class="btn btn-dark btn-go inq-only" href="' + pg('contact') + '"><span class="go-txt">' + I.form + '상담 신청</span><span class="go">' + I.arrow + '</span></a>' +
       '<a class="btn btn-quiet tel-only" href="' + tel() + '">' + I.phone + '전화 상담</a>' +
       '<a class="btn btn-quiet btn-kakao kakao-only" href="' + esc(C.kakaoUrl) + '" target="_blank" rel="noopener">' + KK + '카카오톡 상담</a></div>' +
       '<p class="mnav-info" data-c="hours">' + esc(C.hours) + '</p>';
@@ -184,11 +188,11 @@
       footer.innerHTML = '<div class="wrap">' + logoHtml() +
         '<div class="foot-info"><span>상호 ' + esc(C.legalName || C.name) + '</span><span>대표 ' + esc(C.ceo) + '</span><span>사업자등록번호 ' + esc(C.bizNumber) + '</span></div>' +
         '<div class="foot-info"><span>' + esc(C.address) + '</span><span class="tel-only">전화 <a href="' + tel() + '">' + esc(C.phone) + '</a></span><span data-c="hours">' + esc(C.hours) + '</span></div>' +
-        '<div class="foot-links">' + NAV.map(function (n) { return '<a href="' + n[0] + '">' + n[1] + '</a>'; }).join('') + '<a class="inq-only" href="contact.html">상담 신청</a>' +
+        '<div class="foot-links">' + NAV.map(function (n) { return '<a href="' + n[0] + '">' + n[1] + '</a>'; }).join('') + '<a class="inq-only" href="' + pg('contact') + '">상담 신청</a>' +
         (C.blogUrl ? '<a href="' + esc(C.blogUrl) + '" target="_blank" rel="noopener">네이버 블로그</a>' : '') +
         '<a class="kakao-only" href="' + esc(C.kakaoUrl) + '" target="_blank" rel="noopener">카카오톡 채널</a></div>' +
         '<div class="foot-copy"><span>' + (C.careerSince ? 'Since ' + esc(C.careerSince) + ' · ' : '') + '© ' + new Date().getFullYear() + ' ' + esc(C.name) + '</span>' +
-        '<span class="foot-legal"><a class="foot-privacy" href="privacy.html">개인정보 처리방침</a><a href="admin/">관리자</a></span></div>' +
+        '<span class="foot-legal"><a class="foot-privacy" href="' + pg('privacy') + '">개인정보 처리방침</a><a href="admin/">관리자</a></span></div>' +
         '</div>';
     }
 
@@ -197,7 +201,7 @@
     // 아래 고정 단추: 전화·카톡은 흰 바탕 선 단추(작게), 상담 신청만 진한 단추(넓게) — 색을 3가지로 섞지 않음
     mc.innerHTML = '<a class="btn btn-quiet tel-only" href="' + tel() + '">' + I.phone + '전화</a>' +
       '<a class="btn btn-quiet btn-kakao kakao-only" href="' + esc(C.kakaoUrl) + '" target="_blank" rel="noopener">' + KK + '카톡</a>' +
-      (PAGE === 'contact' ? '' : '<a class="btn btn-dark btn-go inq-only" href="contact.html"><span>상담 신청</span><span class="go">' + I.arrow + '</span></a>');
+      (PAGE === 'contact' ? '' : '<a class="btn btn-dark btn-go inq-only" href="' + pg('contact') + '"><span>상담 신청</span><span class="go">' + I.arrow + '</span></a>');
     if (PAGE === 'contact') mc.classList.add('two');
     body.appendChild(mc);
     var fc = document.createElement('div');
@@ -323,7 +327,7 @@
     var meta = [w.building, pubPlace(w.place, w.size)].filter(Boolean).map(function (m) { return '<span>' + esc(m) + '</span>'; }).join('');
     var tags = (w.scopes || []).slice(0, 5).map(function (t) { return '#' + esc(t); }).join(' ');
     var n = (w.photos || []).length;
-    return '<a class="work-card reveal" href="work.html?id=' + encodeURIComponent(w.id) + '">' +
+    return '<a class="work-card reveal" href="' + pg('work') + '?id=' + encodeURIComponent(w.id) + '">' +
       '<div class="thumb">' + (src ? '<img src="' + esc(src) + '"' + (srcset ? ' srcset="' + esc(srcset) + '" sizes="' + sizes + '"' : '') + ' alt="' + esc(w.title) + '" loading="lazy" decoding="async">' : '') +
       (n > 1 ? '<span class="count">' + I.photo + n + '</span>' : '') + '</div>' +
       (meta ? '<div class="meta">' + meta + '</div>' : '') +
@@ -345,7 +349,7 @@
         return '<button type="button" data-rv="' + esc(r.id) + '" data-i="' + i + '" aria-label="후기 사진 크게 보기"><img src="' + esc(DB.photoUrl(p.thumb || p.full)) + '" alt="" loading="lazy"></button>';
       }).join('') + '</div>' : '') +
       '<div class="who"><span><b>' + esc(r.author) + ' 고객님</b>' + esc(pubPlace(r.place, w && w.size)) + '</span>' +
-      (w ? '<a class="to-work" href="work.html?id=' + encodeURIComponent(w.id) + '">시공사례 보기</a>' : '<span>' + fmtDate(r.created_at) + '</span>') +
+      (w ? '<a class="to-work" href="' + pg('work') + '?id=' + encodeURIComponent(w.id) + '">시공사례 보기</a>' : '<span>' + fmtDate(r.created_at) + '</span>') +
       '</div></article>';
   }
   function errorBox(el, e) {
@@ -410,7 +414,7 @@
     function caption(n) {
       if (!cap) return;
       var w = works[n];
-      cap.href = 'work.html?id=' + encodeURIComponent(w.id);
+      cap.href = pg('work') + '?id=' + encodeURIComponent(w.id);
       cap.innerHTML = '시공사례 &nbsp;|&nbsp; ' + esc(pubPlace(w.place, w.size) || w.title) + I.arrow;
     }
     function ready(img) {
@@ -484,11 +488,11 @@
   function pageWork() {
     var root = q('#work-root');
     var id = param('id');
-    if (!id) { location.replace('works.html'); return; }
+    if (!id) { location.replace(pg('works')); return; }
     Promise.all([DB.getWork(id), DB.listWorks(), DB.listReviews()]).then(function (res) {
       var w = res[0], works = res[1], reviews = res[2];
       if (!w || (!w.published)) {
-        root.innerHTML = '<div class="wrap page-head"><h1>시공사례를 찾을 수 없습니다</h1><p>삭제되었거나 비공개로 바뀐 글입니다.</p><p style="margin-top:28px"><a class="btn btn-line" href="works.html">시공사례 목록으로</a></p></div>';
+        root.innerHTML = '<div class="wrap page-head"><h1>시공사례를 찾을 수 없습니다</h1><p>삭제되었거나 비공개로 바뀐 글입니다.</p><p style="margin-top:28px"><a class="btn btn-line" href="' + pg('works') + '">시공사례 목록으로</a></p></div>';
         return;
       }
       document.title = w.title + ' | ' + C.name + ' 시공사례';
@@ -506,7 +510,7 @@
       var byId = {}; works.forEach(function (o) { byId[o.id] = o; });
 
       root.innerHTML =
-        '<div class="wrap detail-head"><a class="crumb" href="works.html">' + I.arrow + '시공사례 목록</a>' +
+        '<div class="wrap detail-head"><a class="crumb" href="' + pg('works') + '">' + I.arrow + '시공사례 목록</a>' +
         '<h1>' + esc(w.title) + '</h1>' +
         ((w.scopes || []).length ? '<div class="tags">' + w.scopes.map(function (t) { return '#' + esc(t); }).join(' ') + '</div>' : '') + '</div>' +
         (c ? '<div class="wrap"><button class="detail-cover" type="button" data-i="0" style="padding:0;border:0;width:100%;cursor:zoom-in;display:block" aria-label="대표 사진 크게 보기"><img src="' + esc(DB.photoUrl(c.full)) + '" alt="' + esc(w.title) + '"></button></div>' : '') +
@@ -521,7 +525,7 @@
         }).join('') + '</div>' : '') +
         (linked.length ? '<div class="detail-review"><span class="eyebrow">Review</span>' + linked.map(function (r) { return reviewCard(r, null); }).join('') + '</div>' : '') +
         '</div></div>' +
-        (others.length ? '<section class="section" style="padding-bottom:40px"><div class="wrap"><div class="section-head"><div><span class="eyebrow">More</span><h2 class="section-title">다른 시공사례</h2></div><a class="more-link" href="works.html">전체 보기' + I.arrow + '</a></div>' +
+        (others.length ? '<section class="section" style="padding-bottom:40px"><div class="wrap"><div class="section-head"><div><span class="eyebrow">More</span><h2 class="section-title">다른 시공사례</h2></div><a class="more-link" href="' + pg('works') + '">전체 보기' + I.arrow + '</a></div>' +
           '<div class="works-grid">' + others.map(function (o) { return workCard(o); }).join('') + '</div></div></section>' : '');
 
       qa('[data-i]', root).forEach(function (b) {

@@ -6,6 +6,59 @@
 [functions]
   directory = "netlify/functions"
 
+# 주소 끝 .html 없애기: /about.html 로 들어와도 /about 으로 (예전 링크·검색 결과를 한 주소로 모음)
+#  · 파일(about.html)이 실제로 있어서 force = true 가 있어야 동작합니다.
+#  · /work.html?id=… 처럼 뒤에 붙은 값은 Netlify 가 그대로 넘겨 줍니다.
+#  · /about 은 Netlify 가 about.html 을 찾아 보여 줍니다(따로 설정 필요 없음).
+[[redirects]]
+  from = "/index.html"
+  to = "/"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/about.html"
+  to = "/about"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/contact.html"
+  to = "/contact"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/privacy.html"
+  to = "/privacy"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/process.html"
+  to = "/process"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/reviews.html"
+  to = "/reviews"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/works.html"
+  to = "/works"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/work.html"
+  to = "/work"
+  status = 301
+  force = true
+
+
 # 관리화면은 검색엔진에 노출하지 않고, 항상 최신 파일을 받도록
 [[headers]]
   for = "/admin/*"

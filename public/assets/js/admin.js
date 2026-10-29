@@ -1399,7 +1399,7 @@
   function viewDone(kind, id, hidden) {
     var isWork = kind === 'work';
     frame('저장 완료', false, isWork ? 'works' : 'reviews');
-    var link = isWork ? siteUrl('work.html?id=' + encodeURIComponent(id)) : siteUrl('reviews.html');
+    var link = isWork ? siteUrl('work?id=' + encodeURIComponent(id)) : siteUrl('reviews');
     app.innerHTML = '<div class="page"><div class="done">' +
       '<div class="check">' + I.check + '</div>' +
       '<h2>' + (hidden ? '저장했어요' : '홈페이지에 올렸어요') + '</h2>' +
