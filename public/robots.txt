@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+
+# 공개 주소 www.medesign.co.kr
+Sitemap: https://www.medesign.co.kr/sitemap.xml

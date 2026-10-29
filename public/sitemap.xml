@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 공개 주소: https://www.medesign.co.kr (주소가 바뀌면 여기와 robots.txt, make_pages 의 SITE_URL 을 같이 바꾸기) -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.medesign.co.kr/</loc></url>
+  <url><loc>https://www.medesign.co.kr/works.html</loc></url>
+  <url><loc>https://www.medesign.co.kr/process.html</loc></url>
+  <url><loc>https://www.medesign.co.kr/reviews.html</loc></url>
+  <url><loc>https://www.medesign.co.kr/about.html</loc></url>
+  <url><loc>https://www.medesign.co.kr/contact.html</loc></url>
+  <url><loc>https://www.medesign.co.kr/privacy.html</loc></url>
+</urlset>

@@ -1,0 +1,247 @@
+// 3D 그림 만들기 — 관리화면 메뉴 '3D 그림'
+//   관리화면이 그림 한 장마다 줄(render_images, 상태 queued)을 먼저 만들고 이 함수를 부르면,
+//   ① Claude가 도면 그림 + 그 줄에 같이 적어 둔 공사 내용(input: 견적서에서 불러온 항목·자재 + 직접 넣은 내용, 평수, 분위기, 요청 사항)을 읽고
+//      공간마다 그림 설명을 쓰고
+//   ② Google Gemini(그림 AI)가 도면 그림 + 그 설명으로 그림을 그려
+//   ③ 비공개 저장소(private-photos 의 renders/(3D 그림 작업 id)/…)에 넣고 줄을 '다 됨(done)'으로 바꿉니다.
+//   관리화면은 몇 초마다 줄 상태를 다시 읽어 그림을 보여 줍니다.
+//   그림 한 장에 몇십 초 걸릴 수 있어 '백그라운드 함수'(최대 15분, 부르면 바로 202로 대답)로 돌립니다.
+//   요청문은 public/assets/js/render-prompts.js 한 곳에서 관리합니다.
+//
+// Netlify > Project configuration > Environment variables
+//   GEMINI_API_KEY        Google AI Studio 에서 만든 Gemini API 키 — 절대 config.js 같은 공개 파일에 넣지 말 것 (README 4-9)
+//   GEMINI_IMAGE_MODEL    (선택) 그림 모델. 비우면 gemini-nano-banana-2.1
+//   GEMINI_IMAGE_SIZE     (선택) 1K 또는 2K. 비우면 1K (2K는 한 장 값이 더 비쌈)
+//   GEMINI_API_BASE       (선택) 비우면 https://generativelanguage.googleapis.com/v1
+//   RENDER_DAILY_LIMIT    (선택) 24시간 동안 만들 수 있는 그림 수. 비우면 30장 (요금 폭주 방지)
+//   ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_VERSION   (AI 글쓰기와 같은 값. 없으면 ①을 건너뛰고 정해 둔 설명으로 그림)
+//   SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_KEY         (상담 신청·AI 글쓰기 함수와 같은 값)
+//
+// 보안: 로그인한 관리자(admins 표에 있는 이메일)만 쓸 수 있습니다.
+//       AI에는 도면 그림과 공사 내용(항목·자재 이름·평수·분위기·요청 사항)만 보냅니다. 고객 이름·연락처·주소·금액은 보내지 않습니다
+//       (작업 이름·견적서는 읽지 않음 — 그림 줄의 input 만 씀).
+//       오류가 나도 함수가 실패로 끝나지 않게 해서(Netlify가 같은 요청을 다시 돌리지 않게) 줄마다 오류 문구를 적습니다.
+import RP from '../../public/assets/js/render-prompts.js';
+
+const SB_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SB_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const SB_ANON = process.env.SUPABASE_KEY || '';
+const AI_KEY = process.env.ANTHROPIC_API_KEY || '';
+const AI_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+const AI_VERSION = process.env.ANTHROPIC_VERSION || '2026-10-21';
+const G_KEY = process.env.GEMINI_API_KEY || '';
+const G_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1';
+const G_BASE = (process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1').replace(/\/$/, '');
+const G_SIZE = /^[12]K$/.test(process.env.GEMINI_IMAGE_SIZE || '') ? process.env.GEMINI_IMAGE_SIZE : '1K';
+const DAILY = Math.max(1, parseInt(process.env.RENDER_DAILY_LIMIT || '30', 10) || 30);
+const PRIV = 'private-photos';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_PLAN = 8 * 1024 * 1024;   // 도면 그림 최대 8MB (관리화면이 긴 변 1800px JPEG로 줄여서 올림)
+
+// 같은 IP에서 1분에 6번 넘게 누르면 Netlify가 막습니다(429).
+export const config = {
+  path: '/api/render',
+  method: ['POST'],
+  background: true,
+  rateLimit: { windowLimit: 6, windowSize: 60, aggregateBy: ['ip', 'domain'] },
+};
+
+export function sbHeaders(key, extra = {}) {
+  const h = { apikey: key, ...extra };
+  if (key.startsWith('eyJ')) h.authorization = `Bearer ${key}`;
+  return h;
+}
+const enc = (p) => String(p).split('/').map(encodeURIComponent).join('/');
+
+async function adminEmail(token) {
+  const res = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_ANON || SB_KEY, authorization: `Bearer ${token}` } });
+  if (!res.ok) return null;
+  const user = await res.json().catch(() => null);
+  const email = String((user && user.email) || '').toLowerCase();
+  if (!email) return null;
+  const a = await fetch(`${SB_URL}/rest/v1/admins?select=email`, { headers: sbHeaders(SB_KEY) });
+  if (!a.ok) return null;
+  const rows = await a.json().catch(() => []);
+  return rows.some((r) => String(r.email || '').toLowerCase() === email) ? email : null;
+}
+async function rest(path, opt = {}) {
+  const res = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opt, headers: sbHeaders(SB_KEY, { 'content-type': 'application/json', ...(opt.headers || {}) }) });
+  if (!res.ok) throw Object.assign(new Error('db ' + res.status), { code: 'db' });
+  return res.status === 204 ? null : res.json().catch(() => null);
+}
+const patch = (ids, body, extra = '') => rest(`render_images?id=in.(${ids.join(',')})${extra}`, {
+  method: 'PATCH', headers: { prefer: 'return=representation' }, body: JSON.stringify({ ...body, updated_at: new Date().toISOString() }),
+});
+const fail = (ids, msg) => (ids.length ? patch(ids, { status: 'failed', error: String(msg).slice(0, 300) }).catch(() => null) : null);
+
+/* ---------- ① Claude: 도면 읽고 그림 설명 쓰기 ---------- */
+export async function agent(plan, inp, rows, fetchImpl = fetch) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 120e3);
+  try {
+    const res = await fetchImpl('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'content-type': 'application/json', 'anthropic-version': AI_VERSION, 'x-api-key': AI_KEY },
+      body: JSON.stringify({
+        model: AI_MODEL, max_tokens: 4000, system: RP.SYSTEM,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: '도면' },
+          { type: 'image', source: { type: 'base64', media_type: plan.mime, data: plan.b64 } },
+          { type: 'text', text: RP.agentText(inp, rows.map((r) => ({ id: r.id, view: r.view }))) },
+        ] }],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { console.log('[render] Claude 오류', res.status, (data.error && data.error.type) || ''); return null; }
+    return RP.parseAgent((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'));
+  } catch (e) {
+    console.log('[render] Claude 실패', e && e.name);
+    return null;
+  } finally { clearTimeout(timer); }
+}
+
+/* ---------- ② Gemini: 그림 그리기 ---------- */
+export function geminiError(status, data) {
+  const s = JSON.stringify(data || {}).slice(0, 2000);
+  if (/API key not valid|API_KEY_INVALID/i.test(s) || status === 401 || status === 403) return '그림 AI 키가 맞지 않아요. 앤에게 알려 주세요.';
+  if (/billing|FAILED_PRECONDITION|free tier/i.test(s)) return '그림 AI 결제 설정이 아직 안 되어 있어요. 앤에게 알려 주세요.';
+  if (status === 429) return '그림 AI 사용량이 잠시 꽉 찼어요. 몇 분 뒤에 다시 만들어 주세요.';
+  if (status === 404) return '그림 AI 모델 이름이 맞지 않아요. 앤에게 알려 주세요.';
+  if (status >= 500) return '그림 AI 쪽이 잠시 바빠요. 조금 뒤에 다시 만들어 주세요.';
+  return '그림을 만들지 못했어요. 다시 만들어 주세요.';
+}
+/** 응답에서 그림 꺼내기 → { mime, b64 } | { blocked: true } | null */
+export function pickImage(data) {
+  const cand = (data && data.candidates && data.candidates[0]) || null;
+  const parts = (cand && cand.content && cand.content.parts) || [];
+  for (const p of parts) {
+    const d = p.inlineData || p.inline_data;
+    if (d && d.data) return { mime: d.mimeType || d.mime_type || 'image/png', b64: d.data };
+  }
+  const why = String((cand && cand.finishReason) || (data && data.promptFeedback && data.promptFeedback.blockReason) || '');
+  return /SAFETY|BLOCK|PROHIBITED|RECITATION|IMAGE_OTHER/i.test(why) ? { blocked: true } : null;
+}
+export async function gemini(prompt, plan, fetchImpl = fetch) {
+  const body = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt) }, { inline_data: { mime_type: plan.mime, data: plan.b64 } }] }],
+    generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '4:3', imageSize: G_SIZE } },
+  });
+  const call = async (base) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 180e3);
+    try {
+      const res = await fetchImpl(`${base}/models/${encodeURIComponent(G_MODEL)}:generateContent`, {
+        method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json', 'x-goog-api-key': G_KEY }, body,
+      });
+      return { status: res.status, data: await res.json().catch(() => ({})) };
+    } finally { clearTimeout(timer); }
+  };
+  let r = await call(G_BASE);
+  // 주소 버전(v1/v1beta) 차이로 모델을 못 찾으면 한 번 더 (환경변수로 주소를 정했으면 그대로)
+  if (r.status === 404 && !process.env.GEMINI_API_BASE) r = await call(G_BASE.replace(/\/v1$/, '/v1beta'));
+  // 잠깐 붐비면 8초 뒤 한 번 더
+  if (r.status === 429 || r.status >= 500) { await new Promise((ok) => setTimeout(ok, 8000)); r = await call(G_BASE); }
+  if (r.status < 200 || r.status >= 300) {
+    console.log('[render] Gemini 오류', r.status, (r.data && r.data.error && r.data.error.status) || '');
+    throw Object.assign(new Error('gemini'), { msg: geminiError(r.status, r.data) });
+  }
+  const img = pickImage(r.data);
+  if (!img) throw Object.assign(new Error('empty'), { msg: '그림 AI가 그림을 보내지 않았어요. 다시 만들어 주세요.' });
+  if (img.blocked) throw Object.assign(new Error('blocked'), { msg: '그림 AI가 이 그림은 만들지 않았어요. 요청 사항을 바꿔서 다시 만들어 주세요.' });
+  return img;
+}
+
+/* ---------- 저장소 ---------- */
+async function download(path) {
+  const res = await fetch(`${SB_URL}/storage/v1/object/${PRIV}/${enc(path)}`, { headers: sbHeaders(SB_KEY) });
+  if (!res.ok) return null;
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (!buf.length || buf.length > MAX_PLAN) return null;
+  const type = (res.headers.get('content-type') || '').split(';')[0].trim();
+  return { mime: /^image\/(jpeg|png|webp)$/.test(type) ? type : 'image/jpeg', b64: buf.toString('base64') };
+}
+async function upload(path, img) {
+  const res = await fetch(`${SB_URL}/storage/v1/object/${PRIV}/${enc(path)}`, {
+    method: 'POST', headers: sbHeaders(SB_KEY, { 'content-type': img.mime, 'x-upsert': 'true', 'cache-control': 'max-age=3600' }), body: Buffer.from(img.b64, 'base64'),
+  });
+  if (!res.ok) throw Object.assign(new Error('upload ' + res.status), { msg: '그림을 저장하지 못했어요. 다시 만들어 주세요.' });
+}
+
+/* ---------- 차례로 처리 ---------- */
+async function run(req) {
+  if (req.method !== 'POST') return;
+  if ((req.headers.get('sec-fetch-site') || '') === 'cross-site') return;
+  if (!/^application\/json\b/i.test(req.headers.get('content-type') || '')) return;
+  if (!SB_URL || !SB_KEY) { console.log('[render] SUPABASE 환경변수 없음'); return; }
+  const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!token) return;
+  let body;
+  try { body = JSON.parse((await req.text()).slice(0, 20000)); } catch { return; }
+  const ids = [...new Set((Array.isArray(body && body.ids) ? body.ids : []).map(String).filter((x) => UUID.test(x)))].slice(0, RP.MAX_VIEWS);
+  if (!ids.length) return;
+  if (!(await adminEmail(token))) { console.log('[render] 관리자 아님'); return; }   // 줄은 그대로 (관리화면이 '시작하지 못했어요'로 보여 줌)
+
+  const rows = ((await rest(`render_images?select=*&id=in.(${ids.join(',')})&status=eq.queued&order=created_at`)) || []);
+  if (!rows.length) return;
+  const pid = rows[0].project_id;
+  // 한 번에 부른 그림은 같은 작업·같은 도면·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게)
+  const key = (r) => JSON.stringify([r.project_id, r.plan_path, RP.cleanInput(r.input)]);
+  const mine = rows.filter((r) => key(r) === key(rows[0]));
+  await fail(rows.filter((r) => !mine.includes(r)).map((r) => r.id), '다시 만들어 주세요.');
+  if (!G_KEY) return fail(mine.map((r) => r.id), '그림 AI 키(GEMINI_API_KEY)가 아직 설정되지 않았어요. 앤에게 알려 주세요.');
+
+  // 하루(24시간) 장수 제한 — 이미 만들었거나 만드는 중인 그림을 셈
+  const since = new Date(Date.now() - 864e5).toISOString();
+  const used = ((await rest(`render_images?select=id&status=in.(running,done)&created_at=gte.${encodeURIComponent(since)}`)) || []).length;
+  const room = Math.max(0, DAILY - used);
+  const over = mine.slice(room);
+  await fail(over.map((r) => r.id), `하루에 만들 수 있는 그림(${DAILY}장)을 다 썼어요. 내일 다시 만들어 주세요.`);
+  const want = mine.slice(0, room);
+  if (!want.length) return;
+  // 맡기: queued → running (이미 다른 요청이 맡았으면 건너뜀)
+  const claimed = (await patch(want.map((r) => r.id), { status: 'running', error: '', model: G_MODEL }, '&status=eq.queued')) || [];
+  if (!claimed.length) return;
+  const cids = claimed.map((r) => r.id);
+  try { await draw(pid, claimed, cids); }
+  catch (e) {   // 도중에 멈추면 '만드는 중'으로 남지 않게
+    console.log('[render] 도중 실패', e && e.name, e && e.code);
+    await patch(cids, { status: 'failed', error: '그림을 만들지 못했어요. 다시 만들어 주세요.' }, '&status=eq.running').catch(() => null);
+  }
+}
+
+async function draw(pid, claimed, cids) {
+  const planPath = String(claimed[0].plan_path || '');
+  if (!planPath.startsWith(`renders/${pid}/`)) return fail(cids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.');
+  const plan = await download(planPath);
+  if (!plan) return fail(cids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.');
+  const inp = RP.cleanInput(claimed[0].input);
+
+  // ① 도면 읽기 (Claude 키가 없거나 실패하면 정해 둔 설명으로)
+  const plan1 = AI_KEY ? await agent(plan, inp, claimed) : null;
+  if (plan1 && !plan1.planOk) return fail(cids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.');
+
+  // ② 두 장씩 동시에 그리기
+  const queue = claimed.slice();
+  const work = async () => {
+    for (let r = queue.shift(); r; r = queue.shift()) {
+      const v = RP.viewOf(r.view) || RP.VIEWS[0];
+      const a = plan1 && plan1.byId[r.id];
+      if (a && !a.found) { await fail([r.id], `도면에서 ‘${v.name}’을(를) 찾지 못했어요.`); continue; }
+      const prompt = (a && a.prompt) || RP.fallback(inp, r.view);
+      try {
+        const img = await gemini(prompt, plan);
+        const path = `renders/${pid}/${r.id}.${/png/.test(img.mime) ? 'png' : /webp/.test(img.mime) ? 'webp' : 'jpg'}`;
+        await upload(path, img);
+        await patch([r.id], { status: 'done', image_path: path, caption: (a && a.caption) || '', prompt: prompt.slice(0, 4000), error: '' });
+      } catch (e) {
+        await fail([r.id], (e && e.msg) || '그림을 만들지 못했어요. 다시 만들어 주세요.');
+      }
+    }
+  };
+  await Promise.all([work(), work()]);
+}
+
+export default async (req) => {
+  try { await run(req); } catch (e) { console.log('[render] 실패', e && e.name, e && e.code); }
+  // 오류가 나도 정상 종료 (Netlify가 다시 돌리면 같은 그림 값을 또 냄)
+};

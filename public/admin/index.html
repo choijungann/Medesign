@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>미디자인 인테리어 관리화면</title>
+<meta name="theme-color" content="#F1F3F6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../assets/img/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="미디자인 관리">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" integrity="sha384-uR1wgObmx89ZQ4VVXHdzjbDJZ1PvBK01K+E3GebmaBKdZ87qRJvBWPoPbzWeEd5T" crossorigin="anonymous">
+<link rel="stylesheet" href="../assets/css/admin.css">
+</head>
+<body>
+<div class="layout" id="layout">
+<aside class="side" id="side" aria-label="관리 메뉴" hidden></aside>
+<div class="side-backdrop" id="side-backdrop" hidden></div>
+<div class="main-col">
+<div id="demo-note" class="demo-note" hidden>데모 화면입니다 · 여기서 올린 내용은 <b>이 기기(브라우저)에만</b> 저장돼요</div>
+<header class="topbar" id="topbar" hidden>
+  <div class="topbar-in">
+    <button class="icon-btn" id="back-btn" type="button" aria-label="뒤로" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <h1 id="top-title">홈</h1>
+    <!-- 오른쪽 위: 관리화면 첫 화면(대시보드)으로 — 홈페이지 보기는 메뉴 아래쪽에 (2026-10-26) -->
+    <a class="icon-btn home-link" id="home-link" href="#/" aria-label="관리화면 첫 화면으로">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/></svg>
+      <span>홈</span>
+    </a>
+    <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-controls="side" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      <span>메뉴</span>
+    </button>
+  </div>
+</header>
+<main class="shell" id="app">
+  <div class="loading">불러오는 중…</div>
+</main>
+</div>
+</div>
+<noscript><p style="padding:24px">이 화면은 자바스크립트가 켜져 있어야 동작합니다.</p></noscript>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/logo.js"></script>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/image.js"></script>
+<script src="../assets/js/admin.js"></script>
+<script src="../assets/js/admin-date.js"></script>
+<script src="../assets/js/admin-estimate.js"></script>
+<script src="../assets/js/render-prompts.js"></script>
+<script src="../assets/js/admin-render.js"></script>
+<script src="../assets/js/admin-calendar.js"></script>
+<script src="../assets/js/admin-customer.js"></script>
+<script src="../assets/js/admin-contract.js"></script>
+<script src="../assets/js/ai-prompts.js"></script>
+<script src="../assets/js/admin-ai.js"></script>
+<script src="../assets/js/admin-sns.js"></script>
+<script src="../assets/js/admin-privacy.js"></script>
+<script src="../assets/js/admin-admins.js"></script>
+<script src="../assets/js/admin-dashboard.js"></script>
+</body>
+</html>
