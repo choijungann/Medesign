@@ -81,7 +81,7 @@ const fail = (ids, msg) => (ids.length ? patch(ids, { status: 'failed', error: S
 // 그림 줄 id(긴 uuid) 대신 v1, v2… 로 보내고(AI가 id를 잘못 옮겨 적어 설명이 버려지는 일 줄이기) 돌아오면 다시 맞춤.
 // 답의 id가 하나도 안 맞고 개수가 같으면 순서대로 맞춤.
 // 그림마다 관리화면에서 도면을 눌러 찍은 카메라 위치(input.cam)가 있으면 같이 보냄
-const vids = (rows) => rows.map((x, i) => ({ id: 'v' + (i + 1), view: x.view, cam: RP.cleanInput(x.input).cam }));
+const vids = (rows) => rows.map((x, i) => { const c = RP.cleanInput(x.input); return { id: 'v' + (i + 1), view: x.view, cam: c.cam, mark: !!c.camMark }; });
 export function mapAgent(parsed, rows) {
   if (!parsed) return null;
   const byId = {};
@@ -170,9 +170,9 @@ export function pickImage(data) {
   const why = String((cand && cand.finishReason) || (data && data.promptFeedback && data.promptFeedback.blockReason) || '');
   return /SAFETY|BLOCK|PROHIBITED|RECITATION|IMAGE_OTHER/i.test(why) ? { blocked: true } : null;
 }
-export async function gemini(prompt, plan, fetchImpl = fetch) {
+export async function gemini(prompt, plan, fetchImpl = fetch, marked = false) {
   const body = {
-    contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt) }, { inline_data: { mime_type: plan.mime, data: plan.b64 } }] }],
+    contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt, marked) }, { inline_data: { mime_type: plan.mime, data: plan.b64 } }] }],
     generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '4:3', imageSize: G_SIZE } },
   };
   // store:false 를 같이 보냄 (AI Studio 기록에 남기지 않기 — 모르는 주소면 빼고 다시, netlify/lib/gemini.mjs)
@@ -225,8 +225,9 @@ async function run(req) {
   const rows = ((await rest(`render_images?select=*&id=in.(${ids.join(',')})&status=eq.queued&order=created_at`)) || []);
   if (!rows.length) return;
   const pid = rows[0].project_id;
-  // 한 번에 부른 그림은 같은 작업·같은 도면·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게). 카메라 위치는 그림마다 달라도 됨
-  const key = (r) => { const c = RP.cleanInput(r.input); delete c.cam; return JSON.stringify([r.project_id, r.plan_path, c]); };
+  // 한 번에 부른 그림은 같은 작업·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게).
+  // 카메라 위치와 도면 그림은 그림마다 달라도 됨 (카메라를 찍은 그림은 빨간 표시를 그린 도면을 따로 올림)
+  const key = (r) => { const c = RP.cleanInput(r.input); delete c.cam; delete c.camMark; return JSON.stringify([r.project_id, c]); };
   const mine = rows.filter((r) => key(r) === key(rows[0]));
   await fail(rows.filter((r) => !mine.includes(r)).map((r) => r.id), '다시 만들어 주세요.');
   if (!G_KEY) return fail(mine.map((r) => r.id), '그림 AI 키(GEMINI_API_KEY)가 아직 설정되지 않았어요. 앤에게 알려 주세요.');
@@ -251,27 +252,32 @@ async function run(req) {
 }
 
 async function draw(pid, claimed, cids) {
-  const planPath = String(claimed[0].plan_path || '');
-  if (!planPath.startsWith(`renders/${pid}/`)) return fail(cids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.');
-  const plan = await download(planPath);
-  if (!plan) return fail(cids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.');
-  const inp = RP.cleanInput(claimed[0].input);
-
-  // ① 도면 읽기 (Claude, Claude 키가 없으면 Gemini 글 모델 — 실패하면 정해 둔 설명으로)
-  let plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, claimed) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, claimed) : null;
-  if (!plan1 && PROVIDER === 'anthropic' && G_KEY) { console.log('[render] Claude 도면 읽기 실패 → Gemini로 다시'); plan1 = await agentGemini(plan, inp, claimed); }
-  if (plan1 && !plan1.planOk) return fail(cids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.');
+  // 같은 도면 그림끼리 묶어서 읽음: 카메라를 찍은 그림은 빨간 점·화살표를 그린 도면(그 줄의 plan_path), 나머지는 작업 도면
+  const groups = new Map();
+  for (const r of claimed) { const k = String(r.plan_path || ''); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const jobs = [];
+  for (const [planPath, rows] of groups) {
+    const gids = rows.map((r) => r.id);
+    if (!planPath.startsWith(`renders/${pid}/`)) { await fail(gids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.'); continue; }
+    const plan = await download(planPath);
+    if (!plan) { await fail(gids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.'); continue; }
+    const inp = RP.cleanInput(rows[0].input);
+    // ① 도면 읽기 (Claude, Claude 키가 없으면 Gemini 글 모델 — 실패하면 정해 둔 설명으로)
+    let plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, rows) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, rows) : null;
+    if (!plan1 && PROVIDER === 'anthropic' && G_KEY) { console.log('[render] Claude 도면 읽기 실패 → Gemini로 다시'); plan1 = await agentGemini(plan, inp, rows); }
+    if (plan1 && !plan1.planOk) { await fail(gids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.'); continue; }
+    rows.forEach((r) => jobs.push({ r, plan, a: plan1 && plan1.byId[r.id] }));
+  }
 
   // ② 두 장씩 동시에 그리기
-  const queue = claimed.slice();
   const work = async () => {
-    for (let r = queue.shift(); r; r = queue.shift()) {
-      const v = RP.viewOf(r.view) || RP.VIEWS[0];
-      const a = plan1 && plan1.byId[r.id];
+    for (let j = jobs.shift(); j; j = jobs.shift()) {
+      const { r, plan, a } = j;
+      const v = RP.viewOf(r.view) || RP.VIEWS[0], ri = RP.cleanInput(r.input);
       if (a && !a.found) { await fail([r.id], `도면에서 ‘${v.name}’을(를) 찾지 못했어요.`); continue; }
-      const prompt = (a && a.prompt) || RP.fallback(RP.cleanInput(r.input), r.view);
+      const prompt = (a && a.prompt) || RP.fallback(ri, r.view);
       try {
-        const img = await gemini(prompt, plan);
+        const img = await gemini(prompt, plan, fetch, !!ri.camMark);
         const path = `renders/${pid}/${r.id}.${/png/.test(img.mime) ? 'png' : /webp/.test(img.mime) ? 'webp' : 'jpg'}`;
         await upload(path, img);
         await patch([r.id], { status: 'done', image_path: path, caption: (a && a.caption) || '', prompt: prompt.slice(0, 4000), error: '' });

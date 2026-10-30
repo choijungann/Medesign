@@ -323,6 +323,34 @@
       }
       persist(); drawPlan();
     }
+    // 카메라를 찍은 그림: 도면에 빨간 점·화살표·시야(부채꼴)를 그린 JPEG → AI가 방향을 그림으로도 봄
+    function markedPlan(c) {
+      var src = st.urls[p.plan_path];
+      if (!src || !c) return Promise.reject(new Error('no plan'));
+      return fetch(src).then(function (res) { if (!res.ok) throw new Error('plan ' + res.status); return res.blob(); }).then(function (b) {
+        return new Promise(function (ok, no) {
+          var u = URL.createObjectURL(b), im = new Image();
+          im.onerror = function () { URL.revokeObjectURL(u); no(new Error('plan image')); };
+          im.onload = function () {
+            var W = im.naturalWidth, H = im.naturalHeight, M = Math.max(W, H), U = M / 100;
+            var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+            var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage(im, 0, 0); URL.revokeObjectURL(u);
+            var X = c.x * W, Y = c.y * H, RED = '#E0201C';
+            if (c.tx != null) {
+              var a = Math.atan2(c.ty * H - Y, c.tx * W - X), L = Math.max(Math.hypot(c.tx * W - X, c.ty * H - Y), 0.12 * M), R = Math.max(L * 1.15, 0.18 * M), h = 32 * Math.PI / 180;
+              x.beginPath(); x.moveTo(X, Y); x.arc(X, Y, R, a - h, a + h); x.closePath();
+              x.fillStyle = 'rgba(224,32,28,0.16)'; x.fill(); x.lineWidth = 0.25 * U; x.strokeStyle = 'rgba(224,32,28,0.55)'; x.stroke();
+              var ex = X + Math.cos(a) * L, ey = Y + Math.sin(a) * L, hd = 2.4 * U;
+              x.beginPath(); x.moveTo(X, Y); x.lineTo(ex - Math.cos(a) * hd * 0.6, ey - Math.sin(a) * hd * 0.6); x.lineWidth = 0.7 * U; x.strokeStyle = RED; x.lineCap = 'round'; x.stroke();
+              x.beginPath(); x.moveTo(ex, ey); x.lineTo(ex - Math.cos(a - 0.45) * hd, ey - Math.sin(a - 0.45) * hd); x.lineTo(ex - Math.cos(a + 0.45) * hd, ey - Math.sin(a + 0.45) * hd); x.closePath(); x.fillStyle = RED; x.fill();
+            }
+            x.beginPath(); x.arc(X, Y, 1.3 * U, 0, Math.PI * 2); x.fillStyle = RED; x.fill(); x.lineWidth = 0.45 * U; x.strokeStyle = '#fff'; x.stroke();
+            cv.toBlob(function (bl) { if (bl) ok(bl); else no(new Error('jpeg')); }, 'image/jpeg', 0.9);
+          };
+          im.src = u;
+        });
+      });
+    }
     function planCard() {
       var src = p.plan_path && st.urls[p.plan_path];
       var inp = '<input type="file" class="cf-input" id="rd-file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif"' + (st.planBusy ? ' disabled' : '') + '>';
@@ -364,7 +392,8 @@
         '<details class="rd-in"><summary>만든 내용 보기</summary><ul>' + (inp.lines.length ? inp.lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') : '<li>공사 내용 없음</li>') + '</ul>' +
         ((inp.size ? '<p>평수 ' + esc(inp.size) + '평</p>' : '') + (inp.memo ? '<p>요청 사항: ' + esc(inp.memo) + '</p>' : '') +
           (inp.cam ? '<p>카메라: 도면에서 찍은 곳' + (inp.cam.tx != null ? '·방향' : '') + '</p>' : '') +
-          (r.status === 'done' ? '<p>' + (r.caption ? 'AI가 도면을 읽고 공간 설명을 써서 그렸어요' : '도면을 읽지 못해 기본 설명으로 그렸어요') + '</p>' : '')) + '</details></div>' +
+          (r.status === 'done' ? '<p>' + (r.caption ? 'AI가 도면을 읽고 공간 설명을 써서 그렸어요' : '도면을 읽지 못해 기본 설명으로 그렸어요') + '</p>' : '') +
+          (r.status === 'done' && r.prompt ? '<p class="rd-prompt" lang="en">' + esc(r.prompt) + '</p>' : '')) + '</details></div>' +
         '<div class="rd-acts">' +
         (r.status === 'done' && src ? '<button type="button" class="btn btn-outline btn-sm" data-rsave>' + I.down + '<span>저장</span></button>' : '') +
         (busy(r) ? '' : '<button type="button" class="btn btn-outline btn-sm" data-ragain>다시 만들기</button>') +
@@ -425,10 +454,19 @@
       return persist(true).then(function () {
         var input = current();
         // 공간마다 찍어 둔 카메라 위치를 그 그림의 input 에 같이 (공사 내용 비교에는 안 씀)
-        return DB.addRenderImages(views.map(function (v) {
+        // + 빨간 표시를 그린 도면을 따로 올려 그 그림의 도면으로 (못 만들면 원래 도면 + 좌표만)
+        return Promise.all(views.map(function (v) {
           var c = v !== 'overview' && d.cams[v];
-          return { project_id: p.id, view: v, plan_path: p.plan_path, input: c ? Object.assign({}, input, { cam: c }) : input, status: 'queued' };
-        }));
+          if (!c) return { v: v, plan: p.plan_path, input: input };
+          return markedPlan(c).then(function (blob) { return DB.uploadRenderPlan(p.id, blob); }).then(function (path) {
+            return { v: v, plan: path, input: Object.assign({}, input, { cam: c, camMark: true }) };
+          }, function (e) {
+            try { console.warn('[3D] 카메라 표시 도면을 만들지 못함', e && e.message); } catch (x) {}
+            return { v: v, plan: p.plan_path, input: Object.assign({}, input, { cam: c }) };
+          });
+        })).then(function (list) {
+          return DB.addRenderImages(list.map(function (x) { return { project_id: p.id, view: x.v, plan_path: x.plan, input: x.input, status: 'queued' }; }));
+        });
       }).then(function (list) {
         made = list;
         return DB.startRenders(list.map(function (r) { return r.id; }));

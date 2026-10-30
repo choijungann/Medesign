@@ -148,17 +148,24 @@
     return o;
   }
   // AI에게 알려 줄 때: 도면 그림 위의 [y, x] (0~1000, 위·왼쪽부터 — Gemini가 그림 위치를 읽는 방식과 같게)
+  var DIRS = ['top', 'top right', 'right', 'bottom right', 'bottom', 'bottom left', 'left', 'top left'];
+  /** 바라보는 쪽을 말로: 도면 그림에서 위·오른쪽 위… (위 = 그림의 위쪽, 시계 방향) */
+  function camDir(c) {
+    c = camOf(c); if (!c || c.tx == null) return '';
+    var a = Math.atan2(c.tx - c.x, -(c.ty - c.y)) * 180 / Math.PI;   // 0 = 위, 90 = 오른쪽
+    return DIRS[(Math.round(((a + 360) % 360) / 45)) % 8];
+  }
   function camText(c) {
     c = camOf(c); if (!c) return '';
     var pt = function (y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; };
-    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) : ', looking in the most natural direction from there');
+    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) + ' (that is, toward the ' + camDir(c) + ' of the plan image)' : ', looking in the most natural direction from there');
   }
   /** 서버에서 받은 input 다듬기 (길이·종류 제한) */
   function cleanInput(x) {
     x = x && typeof x === 'object' ? x : {};
     var out = { size: t(x.size, 6).replace(/[^0-9.]/g, ''), lines: (Array.isArray(x.lines) ? x.lines : []).slice(0, LINES_MAX).map(function (l) { return t(l, LINE_MAX); }).filter(Boolean),
       style: styleOf(x.style).key, memo: t(x.memo, MEMO_MAX) };
-    var c = camOf(x.cam); if (c) out.cam = c;
+    var c = camOf(x.cam); if (c) { out.cam = c; if (x.camMark === true) out.camMark = true; }   // camMark: 도면 그림에 빨간 점·화살표를 그려서 보냄
     return out;
   }
   /** 공사 내용이 같은지 (평수·공사 줄만 — 예전 내용으로 만든 그림 알아보기) */
@@ -178,7 +185,7 @@
     '- Keep walls, doors, windows and room positions exactly as drawn on the plan. The image model reads floor plans poorly, so describe the layout of the space in words as if the plan were not attached.',
     '- Single room: eye-level wide-angle view (camera about 1.5 m high). First say where the camera stands and which way it looks, in plan terms (e.g. "camera stands by the kitchen island looking toward the balcony windows"). Then describe, as seen from the camera, the far wall, the left side and the right side: windows or sliding doors and what lies beyond them (e.g. balcony, flower bed), doors and which room they lead to, wide openings to neighbouring spaces (e.g. open kitchen and dining area behind or beside), and built-in elements drawn on the plan (kitchen island, partition walls or louvers, built-in wardrobes, bathtub, shower booth). Give the approximate width and depth of the space in metres from the plan\'s dimensions or areas.',
     '- Do not add windows, doors or openings that the plan does not show. Ignore shared areas outside the home (stairs, elevators, corridors) and any title text on the plan.',
-    '- Some views come with a camera point fixed by the designer, given as [y, x] on the floor plan image normalized to 0-1000 (y from the top edge, x from the left edge), and often a point it looks toward. Use exactly that standing point and direction: work out which room the point is in and what is visible from there, and describe the view from that spot. If the point is in a different space than the view name, follow the point.',
+    '- Some views come with a camera point fixed by the designer, given as [y, x] on the floor plan image normalized to 0-1000 (y from the top edge, x from the left edge), and often a point it looks toward. For those views the plan image may also show a red dot (where the camera stands), a red arrow and a light red wedge (the viewing direction and field of view). Use exactly that standing point and direction: work out which room the point is in, which walls, openings and furniture zones fall inside the wedge, and describe only what is visible from that spot in that direction (what is straight ahead, what is on the left and right edges of the frame). Say the viewing direction in room terms (e.g. "looking diagonally from the balcony-side corner toward the kitchen island and the louvered partition"). If the point is in a different space than the view name, follow the point. Never ask the image model to draw the red marks.',
     '- Whole-home overview: 3D isometric cutaway from above at about 45 degrees, ceiling removed, every room furnished appropriately, with the same room arrangement as the plan.',
     '- Text in square brackets after an item is the designer\'s color/finish detail for that item (e.g. 실크 벽지 [화이트 무광] → white matte wallpaper; 강마루 [밝은 오크] → light oak flooring). Follow it exactly.',
     '- Use only the finishes from the list that apply to that space, described visually (e.g. 강마루 → light oak engineered wood flooring; 실크 벽지 → smooth matte wallpaper; 우물천장 간접조명 → recessed ceiling tray with hidden LED cove light). Do not invent brand names or built-ins that the list or plan does not suggest; ordinary movable furniture and decor are fine.',
@@ -204,7 +211,7 @@
       'Style: ' + styleOf(inp.style).en,
       'Designer\'s request (Korean, optional): ' + (inp.memo || '(none)'),
       'Views to render:',
-      views.map(function (v) { var x = viewOf(v.view) || VIEWS[0], c = x.key === 'overview' ? '' : camText(v.cam); return '- id ' + v.id + ': ' + x.en + ' (' + x.name + ')' + (c ? ' — designer-fixed ' + c : ''); }).join('\n'),
+      views.map(function (v) { var x = viewOf(v.view) || VIEWS[0], c = x.key === 'overview' ? '' : camText(v.cam); return '- id ' + v.id + ': ' + x.en + ' (' + x.name + ')' + (c ? ' — designer-fixed ' + c + (v.mark ? ', also drawn on the plan as a red dot, arrow and wedge' : '') : ''); }).join('\n'),
     ].join('\n');
   }
 
@@ -229,7 +236,7 @@
     var shot = v.key === 'overview'
       ? 'Create a photorealistic 3D isometric cutaway rendering of the whole home shown in the attached floor plan, seen from above at about 45 degrees with the ceiling removed. Furnish every room appropriately.'
       : 'Create a photorealistic eye-level interior rendering of ' + v.en + ' shown in the attached floor plan, wide-angle, camera about 1.5 m high.' +
-        (inp.cam ? ' Viewpoint on the attached floor plan image (coordinates [y, x] normalized to 0-1000 from the top-left corner): ' + camText(inp.cam) + '.' : '');
+        (inp.cam ? ' Viewpoint on the attached floor plan image (coordinates [y, x] normalized to 0-1000 from the top-left corner): ' + camText(inp.cam) + '.' + (inp.camMark ? ' It is also marked on the plan with a red dot and arrow.' : '') : '');
     return [
       shot,
       'Keep walls, doors, windows and room positions exactly as drawn on the plan. Typical Korean apartment' + (inp.size ? ' of about ' + inp.size + ' pyeong (Korean unit)' : '') + ', ceiling about 2.3 m, natural daylight.',
@@ -241,9 +248,11 @@
 
   // ② 그림 AI에 보낼 때 항상 덧붙이는 말
   var FINAL = 'Use the attached floor plan as the layout reference for this space: keep the same wall positions, door and window locations and openings to neighbouring spaces as described above. The result must be a rendered interior image, not a copy of the plan. Do not draw any text, room labels, dimension lines, logos, watermarks or people.';
-  function imagePrompt(p) { return String(p || '').trim() + '\n\n' + FINAL; }
+  var MARK = 'The red dot, red arrow and light red wedge drawn on the floor plan show where the camera stands and which way it looks: render the view from exactly that spot in that direction, framed by the wedge. They are only markers - never draw them.';
+  /** 그림 AI에 보내는 글 (marked: 도면에 빨간 카메라 표시를 그려서 보낼 때) */
+  function imagePrompt(p, marked) { return String(p || '').trim() + '\n\n' + (marked ? MARK + '\n' : '') + FINAL; }
 
   return { VIEWS: VIEWS, STYLES: STYLES, MAX_VIEWS: MAX_VIEWS, MEMO_MAX: MEMO_MAX, LINE_MAX: LINE_MAX, NOTE_MAX: NOTE_MAX, COLORS: COLORS, FINISHES: FINISHES, CUSTOM_LEN: CUSTOM_LEN, CUSTOM_MAX: CUSTOM_MAX, viewOf: viewOf, styleOf: styleOf,
-    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText,
+    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText, camDir: camDir,
     SYSTEM: SYSTEM, agentText: agentText, parseAgent: parseAgent, fallback: fallback, imagePrompt: imagePrompt };
 });
