@@ -29,8 +29,8 @@
   function ms(iso) { var t = Date.parse(iso || ''); return isFinite(t) ? t : 0; }
   function age(r, col) { var t = ms(r[col] || r.created_at); return t ? Date.now() - t : 0; }
   function busy(r) { return r.status === 'queued' || r.status === 'running'; }
-  // 이미 알기 쉬운 우리말 오류(이 화면·서버 함수가 만든 것)는 그대로, 아니면 공통 안내로
-  function friendly(e) { var m = String((e && e.message) || e || '').trim(); return /^[가-힣0-9‘'"]/.test(m) ? m : K.friendlyError(e); }
+  // 이미 알기 쉬운 우리말 오류(이 화면·서버 함수가 만든 것 — 'AI 답을…'처럼 영어로 시작해도)는 그대로, 아니면 공통 안내로
+  function friendly(e) { var m = String((e && e.message) || e || '').trim(); return /[가-힣]/.test(m) ? m : K.friendlyError(e); }
   function oops(title, err) { return K.ask({ title: title, text: esc(friendly(err)), cancel: false, ok: '확인' }); }
   function sign(paths) { paths = (paths || []).filter(Boolean); return paths.length && DB.signPhotos ? DB.signPhotos(paths) : Promise.resolve({}); }
   // 견적서 → 작업 이름 (고객 이름 · 공사명) — 관리화면에서만 보이고 AI에는 보내지 않음
@@ -327,17 +327,24 @@
       persist(); drawPlan();
     }
     // 카메라를 찍은 그림: 도면에 빨간 점·화살표·시야(부채꼴)를 그린 JPEG → AI가 방향을 그림으로도 봄
-    function markedPlan(c) {
+    // 도면 그림 불러오기 (그림으로 읽음 — 보안 설정(CSP)이 막는 fetch(blob:) 대신. 방금 올린 도면은 blob:, 다시 연 도면은 Supabase 주소)
+    function planImage() {
       var src = st.urls[p.plan_path];
-      if (!src || !c) return Promise.reject(new Error('no plan'));
-      return fetch(src).then(function (res) { if (!res.ok) throw new Error('plan ' + res.status); return res.blob(); }).then(function (b) {
+      if (!src) return Promise.reject(new Error('no plan'));
+      return new Promise(function (ok, no) {
+        var im = new Image(); im.crossOrigin = 'anonymous';
+        im.onload = function () { ok(im); };
+        im.onerror = function () { no(new Error('plan image')); };
+        im.src = src;
+      });
+    }
+    function markedPlan(c) {
+      if (!c) return Promise.reject(new Error('no cam'));
+      return planImage().then(function (im) {
         return new Promise(function (ok, no) {
-          var u = URL.createObjectURL(b), im = new Image();
-          im.onerror = function () { URL.revokeObjectURL(u); no(new Error('plan image')); };
-          im.onload = function () {
             var W = im.naturalWidth, H = im.naturalHeight, M = Math.max(W, H), U = M / 100;
             var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-            var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage(im, 0, 0); URL.revokeObjectURL(u);
+            var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage(im, 0, 0);
             var X = c.x * W, Y = c.y * H, RED = '#E0201C';
             if (c.tx != null) {
               var a = Math.atan2(c.ty * H - Y, c.tx * W - X), L = Math.max(Math.hypot(c.tx * W - X, c.ty * H - Y), 0.12 * M), R = Math.max(L * 1.15, 0.18 * M), h = ((RW ? RW.FOV : 70) / 2) * Math.PI / 180;   // 밑그림 시야각과 같게
@@ -348,9 +355,7 @@
               x.beginPath(); x.moveTo(ex, ey); x.lineTo(ex - Math.cos(a - 0.45) * hd, ey - Math.sin(a - 0.45) * hd); x.lineTo(ex - Math.cos(a + 0.45) * hd, ey - Math.sin(a + 0.45) * hd); x.closePath(); x.fillStyle = RED; x.fill();
             }
             x.beginPath(); x.arc(X, Y, 1.3 * U, 0, Math.PI * 2); x.fillStyle = RED; x.fill(); x.lineWidth = 0.45 * U; x.strokeStyle = '#fff'; x.stroke();
-            cv.toBlob(function (bl) { if (bl) ok(bl); else no(new Error('jpeg')); }, 'image/jpeg', 0.9);
-          };
-          im.src = u;
+            try { cv.toBlob(function (bl) { if (bl) ok(bl); else no(new Error('jpeg')); }, 'image/jpeg', 0.9); } catch (e) { no(e); }
         });
       });
     }
@@ -476,11 +481,8 @@
     }
     // 도면 글자 대신 밝기만 (진한 벽선에 맞춰 붙이기 — 못 읽으면 붙이기 없이)
     function planPixels() {
-      var src = st.urls[p.plan_path];
-      if (!src) return Promise.resolve(null);
-      return new Promise(function (ok) {
-        var im = new Image(); im.crossOrigin = 'anonymous';
-        im.onload = function () {
+      return planImage().then(function (im) {
+        return new Promise(function (ok) {
           var W = im.naturalWidth, H = im.naturalHeight;
           try {
             var s = Math.min(1, 1400 / Math.max(W, H)), w = Math.max(1, Math.round(W * s)), h = Math.max(1, Math.round(H * s));
@@ -490,10 +492,8 @@
             for (var i = 0; i < w * h; i++) lum[i] = (a[i * 4] * 299 + a[i * 4 + 1] * 587 + a[i * 4 + 2] * 114) / 1000;
             ok({ W: W, H: H, px: { lum: lum, w: w, h: h } });
           } catch (e) { ok({ W: W, H: H, px: null }); }
-        };
-        im.onerror = function () { ok(null); };
-        im.src = src;
-      });
+        });
+      }).catch(function () { return null; });
     }
     function extract() {
       if (!RW || !p.plan_path || st.wbusy) return;
@@ -509,7 +509,9 @@
           var w = RW.fromAI(r[0], W, H, { px: px && px.px, size: d.size });
           if (!w || !w.s.length) throw new Error('도면에서 벽을 찾지 못했어요. 직접 그려 주세요.');
           d.walls = w; st.wh = []; st.wsel = -1; st.wa = null; st.wall = true; st.wtool = 'pick'; st.gcache = {};
-          return persist(true);
+          return persist(true).then(function () {
+            if (r[0] && r[0].partial) return K.ask({ title: '벽을 일부만 땄어요', text: 'AI 답이 길어서 중간에 끊겼어요. 빠진 벽은 <b>선 긋기</b>로 그려 주세요.', cancel: false, ok: '확인' });
+          });
         }).catch(function (err) { oops('벽을 따지 못했어요', err); })
           .then(function () { st.wbusy = false; if (page.isConnected) drawPlan(); });
       });

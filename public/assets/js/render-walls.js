@@ -265,31 +265,68 @@
   }
 
   /* ---------- ① 서버: 글 AI에게 벽 따기 ---------- */
+  // 답은 짧은 모양(숫자 배열)으로 받음 — 실제 도면은 벽이 많아 답이 길어지면 중간에 끊겨(최대 길이) 읽지 못하는 일이 생김 (2026-10-30)
   var EXTRACT = [
     'You convert a 2D architectural floor plan image (usually a Korean apartment) into wall geometry for a simple grey 3D massing model.',
-    'Coordinates are [y, x] points on the image, normalized to 0-1000 (y from the top edge, x from the left edge), the same convention as object detection boxes.',
+    'Coordinates are integer [y, x] points on the image, normalized to 0-1000 (y from the top edge, x from the left edge), the same convention as object detection boxes.',
     '',
     'Return:',
-    '- "walls": every wall of the home as straight segments along the wall\'s centre line: {"a": [y, x], "b": [y, x]}.',
+    '- "walls": every wall of the home as a straight segment along the wall\'s centre line: [y1, x1, y2, x2].',
     '  Include exterior walls, interior partition walls and short wall stubs. Draw a wall straight through any door or window in it - openings are listed separately.',
-    '  Start and end each segment exactly at corners, T-junctions and wall ends; where walls meet, use exactly the same point. Walls drawn horizontally or vertically must have the same y (or x) at both ends.',
-    '- "openings": every door, window and wide opening: {"type": "door" | "window" | "glass" | "open", "a": [y, x], "b": [y, x]} - the two ends of the opening on its wall\'s centre line.',
+    '  Use as few segments as possible: one segment per straight wall between corners or junctions (at most 200). Start and end each segment exactly at corners, T-junctions and wall ends; where walls meet, use exactly the same point. Horizontal walls must have the same y at both ends, vertical walls the same x.',
+    '- "openings": every door, window and wide opening: {"t": "door" | "window" | "glass" | "open", "p": [y1, x1, y2, x2]} - the two ends of the opening on its wall\'s centre line.',
     '  door: a door leaf or swing arc, a sliding door or a doorway. window: a window in a wall with a sill at about waist height (often thin parallel lines inside the wall). glass: a floor-to-ceiling window or sliding glass door, e.g. between the living room and the balcony. open: a wide opening between two spaces with no door and no wall.',
-    '- "dims": up to 6 dimension annotations you can read clearly: {"a": [y, x], "b": [y, x], "mm": 3600} - the two ends of the dimension line and its value in millimetres.',
+    '- "dims": up to 6 dimension annotations you can read clearly: [y1, x1, y2, x2, mm] - the two ends of the dimension line and its value in millimetres (convert metres: 2.4 m -> 2400).',
     '- Leave out furniture, fixtures, text, hatching, dimension lines and everything outside the home (shared corridor, stairs, elevator).',
     '- "plan_ok": false only if the image is clearly not a floor plan.',
     '',
-    'Reply with JSON only, no other text:',
-    '{"plan_ok": true, "walls": [{"a": [y, x], "b": [y, x]}], "openings": [{"type": "door", "a": [y, x], "b": [y, x]}], "dims": [{"a": [y, x], "b": [y, x], "mm": 0}]}',
+    'Reply with JSON only, no other text, for example:',
+    '{"plan_ok": true, "walls": [[120, 80, 120, 920], [120, 920, 880, 920]], "openings": [{"t": "door", "p": [300, 560, 380, 560]}], "dims": [[80, 80, 80, 920, 11000]]}',
   ].join('\n');
+  // Gemini 답 모양 고정 (구조화된 답 — 모르는 주소면 서버가 빼고 다시 보냄)
+  var SCHEMA = {
+    type: 'OBJECT',
+    properties: {
+      plan_ok: { type: 'BOOLEAN' },
+      walls: { type: 'ARRAY', items: { type: 'ARRAY', items: { type: 'INTEGER' } } },
+      openings: { type: 'ARRAY', items: { type: 'OBJECT', properties: { t: { type: 'STRING', enum: ['door', 'window', 'glass', 'open'] }, p: { type: 'ARRAY', items: { type: 'INTEGER' } } }, required: ['t', 'p'] } },
+      dims: { type: 'ARRAY', items: { type: 'ARRAY', items: { type: 'INTEGER' } } },
+    },
+    required: ['plan_ok', 'walls', 'openings', 'dims'],
+    propertyOrdering: ['plan_ok', 'walls', 'openings', 'dims'],
+  };
   function parseJSON(text) {
     var s = String(text || ''), a = s.indexOf('{'), b = s.lastIndexOf('}');
     if (a < 0 || b <= a) return null;
     try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { return null; }
   }
-  /** AI 답 다듬기 (서버에서) → { plan_ok, walls: [{a, b}], openings: [{type, a, b}], dims: [{a, b, mm}] } | null */
+  /** 깨지거나 중간에 끊긴 답에서 다 적힌 것만 건지기 → { …, partial: true } | null */
+  function salvage(text) {
+    var s = String(text || '');
+    var at = function (k) { return s.search(new RegExp('"' + k + '"\\s*:')); };
+    var iw = at('walls'), io = at('openings'), id = at('dims');
+    if (iw < 0) return null;
+    var part = function (i) { if (i < 0) return ''; var ends = [iw, io, id, s.length].filter(function (v) { return v > i; }); return s.slice(i, Math.min.apply(null, ends)); };
+    var objs = function (str) { var out = []; (str.match(/\{[^{}]*\}/g) || []).forEach(function (o) { try { out.push(JSON.parse(o)); } catch (e) {} }); return out; };
+    var arrs = function (str, n) {
+      var out = [], re = /\[\s*(-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?)*)\s*\]/g, m;
+      while ((m = re.exec(str))) { var a = m[1].split(',').map(Number); if (a.length === n) out.push(a); }
+      return out;
+    };
+    var W = part(iw), walls = arrs(W, 4).concat(objs(W));
+    if (!walls.length) return null;
+    var pk = /"plan_ok"\s*:\s*(true|false)/.exec(s), D = part(id);
+    return { plan_ok: !pk || pk[1] === 'true', walls: walls, openings: objs(part(io)), dims: arrs(D, 5).concat(objs(D)), partial: true };
+  }
+  /** AI 답 글 → 읽은 것 (제대로 된 JSON, 아니면 건질 수 있는 만큼) | null */
+  function parseAI(text) {
+    var j = parseJSON(text);
+    if (j && typeof j === 'object' && Array.isArray(j.walls)) return j;
+    return salvage(text) || j;
+  }
+  /** AI 답 다듬기 (서버에서) → { plan_ok, walls: [{a, b}], openings: [{type, a, b}], dims: [{a, b, mm}], partial } | null */
   function cleanAI(j) {
-    if (!j || typeof j !== 'object') return null;
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
     var P = function (p) {
       if (!Array.isArray(p) || p.length < 2) return null;
       var y = Number(p[0]), x = Number(p[1]);
@@ -297,17 +334,26 @@
       return [Math.round(Math.max(0, Math.min(1000, y)) * 10) / 10, Math.round(Math.max(0, Math.min(1000, x)) * 10) / 10];
     };
     var seg = function (q) {
-      if (Array.isArray(q) && q.length >= 4) q = { a: [q[0], q[1]], b: [q[2], q[3]] };   // [y1, x1, y2, x2] 로 답한 것도
+      if (Array.isArray(q) && q.length >= 4) q = { a: [q[0], q[1]], b: [q[2], q[3]] };   // [y1, x1, y2, x2]
+      else if (q && Array.isArray(q.p) && q.p.length >= 4) q = { a: [q.p[0], q.p[1]], b: [q.p[2], q.p[3]] };
       var a = P(q && q.a), b = P(q && q.b);
       return a && b && (a[0] !== b[0] || a[1] !== b[1]) ? { a: a, b: b } : null;
     };
     var arr = function (v) { return Array.isArray(v) ? v : []; };
     var TYPES = ['door', 'window', 'glass', 'open'];
+    var seen = {}, once = function (x, k) { var key = (k || '') + [x.a, x.b].map(String).sort().join('|'); if (seen[key]) return false; seen[key] = 1; return true; };   // 같은 선을 되풀이한 답(가끔 생김)은 한 번만
     return {
       plan_ok: j.plan_ok !== false,
-      walls: arr(j.walls).map(seg).filter(Boolean).slice(0, 300),
-      openings: arr(j.openings).map(function (q) { var s = seg(q), ty = String((q && q.type) || '').toLowerCase(); return s && TYPES.indexOf(ty) >= 0 ? { type: ty, a: s.a, b: s.b } : null; }).filter(Boolean).slice(0, 150),
-      dims: arr(j.dims).map(function (q) { var s = seg(q), mm = Number(q && q.mm); return s && mm >= 100 && mm <= 100000 ? { a: s.a, b: s.b, mm: Math.round(mm) } : null; }).filter(Boolean).slice(0, 12),
+      walls: arr(j.walls).map(seg).filter(function (x) { return x && once(x); }).slice(0, 300),
+      openings: arr(j.openings).map(function (q) {
+        var s = seg(q), ty = String((q && (q.t || q.type)) || '').toLowerCase();
+        return s && TYPES.indexOf(ty) >= 0 && once(s, ty) ? { type: ty, a: s.a, b: s.b } : null;
+      }).filter(Boolean).slice(0, 150),
+      dims: arr(j.dims).map(function (q) {
+        var s = seg(q), mm = Number(Array.isArray(q) ? q[4] : q && q.mm);
+        return s && mm >= 100 && mm <= 100000 ? { a: s.a, b: s.b, mm: Math.round(mm) } : null;
+      }).filter(Boolean).slice(0, 12),
+      partial: !!j.partial,
     };
   }
 
@@ -440,5 +486,5 @@
   return { KINDS: KINDS, KIND: KIND, HOLE: HOLE, CEIL: CEIL, EYE: EYE, FOV: FOV, MAX_SEGS: MAX_SEGS, GUIDE_W: GUIDE_W, GUIDE_H: GUIDE_H,
     clean: clean, has: has, segLen: segLen, metres: metres, nearSeg: nearSeg, projLine: projLine, cut: cut,
     straighten: straighten, refine: refine, joinEnds: joinEnds, scaleOf: scaleOf, fromAI: fromAI,
-    EXTRACT: EXTRACT, parseJSON: parseJSON, cleanAI: cleanAI, faces: faces, raster: raster };
+    EXTRACT: EXTRACT, SCHEMA: SCHEMA, parseJSON: parseJSON, salvage: salvage, parseAI: parseAI, cleanAI: cleanAI, faces: faces, raster: raster };
 });

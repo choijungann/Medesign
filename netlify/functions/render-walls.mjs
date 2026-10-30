@@ -76,12 +76,15 @@ export async function viaGemini(plan, timeoutMs, fetchImpl = fetch) {
   const body = {
     system_instruction: { parts: [{ text: RW.EXTRACT }] },
     contents: [{ role: 'user', parts: [{ inline_data: { mime_type: plan.mime, data: plan.b64 } }, { text: 'Floor plan above. Reply with the JSON.' }] }],
-    generationConfig: { maxOutputTokens: 16000, responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: THINK } },
+    // 답 모양을 고정(responseSchema)해서 JSON 이 깨지지 않게. 모르는 칸이라고 거절하면 모양 → JSON 지정 차례로 빼고 다시
+    generationConfig: { maxOutputTokens: 20000, responseMimeType: 'application/json', responseSchema: RW.SCHEMA, thinkingConfig: { thinkingLevel: THINK } },
   };
+  const t0 = Date.now();
   let r = await G.generate({ model: G.G_TEXT_MODEL, body, timeoutMs, fetchImpl });
-  if (r.status === 400 && /mime/i.test(G.errText(r.data))) {
-    delete body.generationConfig.responseMimeType;
-    r = await G.generate({ model: G.G_TEXT_MODEL, body, timeoutMs, fetchImpl });
+  for (let i = 0; i < 2 && r.status === 400 && /schema|mime|propertyOrdering|enum/i.test(G.errText(r.data)); i++) {
+    console.log('[render-walls] 답 모양 지정을 거절함 → 빼고 다시', G.errText(r.data).slice(0, 160));
+    if (body.generationConfig.responseSchema) delete body.generationConfig.responseSchema; else delete body.generationConfig.responseMimeType;
+    r = await G.generate({ model: G.G_TEXT_MODEL, body, timeoutMs: timeoutMs - (Date.now() - t0), fetchImpl });
   }
   if (r.status < 200 || r.status >= 300) {
     const kind = G.errKind(r.status, r.data);
@@ -89,8 +92,9 @@ export async function viaGemini(plan, timeoutMs, fetchImpl = fetch) {
     return { error: MSG[kind] || MSG.other, code: kind };
   }
   if (G.finishOf(r.data) === 'blocked') return { error: MSG.other, code: 'blocked' };
-  if (G.finishOf(r.data) === 'cut') console.log('[render-walls] Gemini 답이 길어서 잘림');
-  return { text: G.textOf(r.data), model: G.G_TEXT_MODEL };
+  const cand = (r.data && r.data.candidates && r.data.candidates[0]) || {}, u = (r.data && r.data.usageMetadata) || {};
+  const info = `끝=${cand.finishReason || '?'} 생각=${u.thoughtsTokenCount || 0} 답=${u.candidatesTokenCount || 0} ${((Date.now() - t0) / 1000).toFixed(1)}초`;
+  return { text: G.textOf(r.data), model: G.G_TEXT_MODEL, info };
 }
 /** Claude (Gemini 키가 없을 때) → { text } | { error, code } */
 export async function viaClaude(plan, timeoutMs, fetchImpl = fetch) {
@@ -141,11 +145,13 @@ export default async (req) => {
 
     const out = G.G_KEY ? await viaGemini(plan, deadline - Date.now()) : await viaClaude(plan, deadline - Date.now());
     if (out.error) return json(502, { ok: false, code: out.code || 'ai_error', error: out.error });
-    const j = RW.cleanAI(RW.parseJSON(out.text));
-    if (!j) { console.log('[render-walls] 답을 읽지 못함', String(out.text || '').length); return json(502, { ok: false, code: 'parse', error: 'AI 답을 읽지 못했어요. 다시 눌러 주세요.' }); }
+    const text = String(out.text || ''), j = RW.cleanAI(RW.parseAI(text));
+    // 로그: 왜 못 읽었는지 알 수 있게 (도면 좌표뿐이라 개인정보 없음)
+    if (!j || j.partial || !j.walls.length) console.log('[render-walls] 답', out.info || '', '글자', text.length, '앞:', text.slice(0, 200).replace(/\s+/g, ' '), '뒤:', text.slice(-200).replace(/\s+/g, ' '));
+    if (!j) return json(502, { ok: false, code: 'parse', error: 'AI 답을 읽지 못했어요. 다시 눌러 주세요. 계속 안 되면 직접 그려 주세요.' });
     if (!j.plan_ok) return json(422, { ok: false, code: 'not_plan', error: '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.' });
     if (!j.walls.length) return json(422, { ok: false, code: 'empty', error: '도면에서 벽을 찾지 못했어요. 직접 그려 주세요.' });
-    console.log('[render-walls] 벽', j.walls.length, '문·창', j.openings.length, '치수', j.dims.length);
+    console.log('[render-walls] 벽', j.walls.length, '문·창', j.openings.length, '치수', j.dims.length, j.partial ? '(끊긴 답에서 건짐)' : '', out.info || '');
     return json(200, { ok: true, ...j, model: out.model });
   } catch (e) {
     console.log('[render-walls] 실패', e && e.name);
