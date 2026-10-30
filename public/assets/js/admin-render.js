@@ -569,8 +569,9 @@
       }).join('') + '</div>';
       return '<div class="rd-cam rd-furn">' + secHd('rd-furn-l', '가구·구조 위치', '<button type="button" class="rd-cam-clear rd-del rd-reset" data-furnreset' + (RP.furnKeys(d.furn).length ? '' : ' disabled') + '>' + RESET + '<span>초기화</span></button>') + tabs +
         '<div class="rd-cam-chips rd-furn-chips" role="tabpanel" aria-labelledby="rd-ftab-' + gr.g + '">' + RP.FURN.filter(function (f) { return f.g === gr.g; }).map(function (f) {
-          var on = selKind === f.key, n = keysOf(f.key).length;
-          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (n ? ' set' : '') + '" data-furn="' + esc(f.key) + '" aria-pressed="' + on + '" aria-label="' + esc(f.name) + (n ? ' (' + n + '개 놓음)' : '') + '"><span>' + esc(f.name) + '</span>' + (n > 1 ? '<small class="rd-fn">' + n + '</small>' : '') + '</button>';   // 놓은 가구는 색칠 (체크 표시 대신), 두 개 이상이면 개수
+          // 세 가지 모양 (2026-10-30 — 놓은 것·놓으려는 것이 헷갈리지 않게): 색칠 = 놓은 게 있음, 진한 테두리 = 도면에서 고른 가구의 종류, 점선 + 모서리 '+' = 지금 새로 놓는 중
+          var adding = st.add === f.key, on = !adding && selKind === f.key, n = keysOf(f.key).length;
+          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (adding ? ' adding' : '') + (n ? ' set' : '') + '" data-furn="' + esc(f.key) + '" aria-pressed="' + (on || adding) + '" aria-label="' + esc(f.name) + (n ? ' (' + n + '개 놓음)' : '') + (adding ? ' — 새로 놓는 중' : '') + '"><span>' + esc(f.name) + '</span>' + (n > 1 ? '<small class="rd-fn">' + n + '</small>' : '') + '</button>';   // 놓은 가구는 색칠 (체크 표시 대신), 두 개 이상이면 개수
         }).join('') + '</div>' + box + '</div>';
     }
     // 새로 놓기: 한 번 누르면 바로 놓이고 골라짐. 벽 선이 있으면 가까운 벽(1.2m 안)에 등을 붙이고 방 쪽을 보게

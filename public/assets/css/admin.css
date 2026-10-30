@@ -3163,6 +3163,10 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-furn-chips .rd-cam-chip.set { background: #F8E1C4; border-color: #DDAE77; color: #5A3410; }
 .rd-furn-chips .rd-cam-chip.on { border-color: #8C5A2E; box-shadow: inset 0 0 0 1px #8C5A2E; }
 .rd-furn-chips .rd-cam-chip.on:not(.set) { background: #FCEEDD; }
+.rd-furn-chips .rd-cam-chip { position: relative; }
+.rd-furn-chips .rd-cam-chip.adding { border: 2px dashed #8C5A2E; padding: 3.5px 15.5px; box-shadow: none; }   /* 새로 놓는 중: 점선 + 모서리 '+' (놓은 가구를 고른 진한 실선과 구별) */
+.rd-furn-chips .rd-cam-chip.adding:not(.set) { background: #fff; }
+.rd-furn-chips .rd-cam-chip.adding::after { content: "+"; position: absolute; top: -7px; right: -5px; width: 18px; height: 18px; border-radius: 50%; background: #8C5A2E; color: #fff; font-size: 15px; font-weight: 800; line-height: 17px; text-align: center; box-shadow: 0 0 0 2px #FBF6EF; }
 .rd-fn { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 2px; padding: 0 5px; border-radius: 10px; background: #B45309; color: #fff; font-size: 12.5px; font-weight: 700; line-height: 1; }   /* 놓은 개수 (두 개 이상) */
 /* 분류 탭: 칸 사이 줄은 틈(1.5px)으로 그려 모든 칸의 너비·높이가 똑같게 (테두리를 칸에 붙이면 둘째 줄이 줄 두께만큼 낮아 보였음 — 2026-10-30) */
 .rd-ftabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 1.5px; background: var(--line-2); }
