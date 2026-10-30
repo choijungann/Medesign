@@ -2898,7 +2898,13 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-addc { margin: 0 0 20px; }
 .rd-size .est-suffix { max-width: 200px; }
 /* 도면 */
-.rd-plan-box { margin: 0 0 12px; border: 2px solid var(--line); border-radius: 12px; background: #F6F7F8; overflow: hidden; }
+.rd-plan-box { position: relative; margin: 0 0 12px; border: 2px solid var(--line); border-radius: 12px; background: #F6F7F8; overflow: hidden; }
+.rd-plan-scroll { overflow: hidden; touch-action: pan-x pan-y; }   /* 두 손가락 벌리기는 화면 전체가 아니라 도면만 키움 */
+.rd-plan-box.zoomed .rd-plan-scroll { overflow: auto; scrollbar-width: thin; }
+.rd-zoom { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; }
+.rd-zoom button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 2px solid var(--line-2); border-radius: 10px; background: rgba(255, 255, 255, .94); color: var(--ink); cursor: pointer; }
+.rd-zoom button svg { width: 20px; height: 20px; }
+.rd-zoom button:disabled { opacity: .4; cursor: default; }
 .rd-plan-box img { display: block; width: 100%; max-height: 360px; object-fit: contain; cursor: zoom-in; }
 .rd-plan-box .hint { margin: 0; padding: 18px; text-align: center; }
 .rd-plan .hint { margin: 8px 0 16px; }
@@ -2979,18 +2985,22 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-guide span { padding: 0 8px 6px; }
 .rd-guide-none { margin: 0 0 14px; font-size: 15px; color: var(--ink-3); }
 /* 가구 위치 */
-.rd-furn-tip { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+.rd-furn-tip { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; position: sticky; bottom: 8px; z-index: 3; box-shadow: 0 0 0 1px #D5DEE9, 0 4px 14px rgba(30, 50, 80, .10); }   /* 고른 가구 칸: 아래로 내려가 있어도 화면 아래에 붙어 보임 */
 .rd-furn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .rd-furn-row .rd-wbtn { min-height: 40px; padding: 4px 10px; background: var(--surface); }
 .rd-furn-row .rd-wnum .input { width: 64px; min-height: 40px; padding: 4px 8px; }
 .rd-furn-row .rd-wnum .input::placeholder { color: var(--ink-3); }
-.rd-furn-x { margin-left: auto; }
-.rd-furn-g { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
-.rd-furn-gl { flex: none; width: 56px; padding-top: 11px; font-size: 14.5px; font-weight: 700; color: var(--ink-3); }
-.rd-furn-g .rd-cam-chips { flex: 1; min-width: 0; }
-@media (max-width: 560px) { .rd-furn-g { flex-direction: column; gap: 4px; } .rd-furn-gl { width: auto; padding-top: 0; } }   /* 휴대폰: 이름은 위에, 단추는 한 줄 끝까지 */
-.rd-furn-tools { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
-.rd-furn-tools .input { width: 70px; min-height: 40px; }
+.rd-furn-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rd-furn-x { flex: none; }
+.rd-ftabs { margin: 0 0 10px; }   /* 가구 분류 탭 (견적 품목 고르기 창의 탭과 같은 모양) */
+.rd-ftabs .fd-tab { min-height: 42px; padding: 4px 2px; font-size: 15.5px; }
+.rd-ftabs .fd-tab small { font-size: 13px; }
+.rd-furn-chips { margin-bottom: 4px; }
+@media (max-width: 560px) {   /* 휴대폰: 분류 탭 3칸 × 2줄 */
+  .rd-ftabs { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .rd-ftabs .fd-tab:nth-child(3n + 1) { border-left: 0; }
+  .rd-ftabs .fd-tab:nth-child(n + 4) { border-top: 1.5px solid var(--line-2); }
+}
 .rd-fu polygon { fill: rgba(217, 119, 6, .16); stroke: #B45309; }
 .rd-fu-front { stroke: #B45309; stroke-linecap: round; }
 .rd-fu-arr { stroke: #B45309; stroke-linecap: round; }
@@ -2999,10 +3009,17 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-fu.on polygon { fill: rgba(217, 119, 6, .32); }
 .rd-fu-line line { stroke: #B45309; stroke-linecap: round; opacity: .8; }
 .rd-fu-line.on line { opacity: 1; }
-.rd-fu-start { fill: #B45309; }
-.rd-furn-tabs { display: inline-flex; gap: 4px; }
-.rd-furn-tab { min-width: 36px; min-height: 36px; padding: 0 8px; border: 2px solid var(--line-2); border-radius: 10px; background: var(--surface); font: inherit; font-size: 15px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
-.rd-furn-tab.on { border-color: var(--primary); color: var(--ink); }
+/* 도면 위 가구를 바로 누르고 끌기 (고른 가구에는 손잡이) */
+.rd-cam-svg .rd-fu, .rd-cam-svg .rd-fhd { pointer-events: auto; cursor: grab; touch-action: none; }
+.rd-plan-box.wall-on .rd-fu, .rd-plan-box.wall-on .rd-fhd, .rd-plan-box.placing .rd-fu, .rd-plan-box.placing .rd-fhd, .rd-plan-box.cam-pick .rd-fu, .rd-plan-box.cam-pick .rd-fhd { pointer-events: none; }
+.rd-fu-line .rd-fu-hit { stroke: transparent; opacity: 1; }
+.rd-fu-fin line { stroke: #BE185D; stroke-linecap: butt; }   /* 벽 마감: 대리석(실선)·타일(긴 점선)·파벽(짧은 점선) */
+.rd-fu-fin text { fill: #831843; }
+.rd-fhd.fin { stroke: #BE185D; }
+.rd-fhd { fill: #fff; stroke: #B45309; }
+.rd-fhd-rot { fill: #FEF3C7; cursor: alias; }
+.rd-fhd-w, .rd-fhd-d { cursor: ew-resize; }
+.rd-fu.on polygon { stroke-dasharray: none; }
 /* 현재 집 사진 */
 .rd-ref-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .rd-ref { display: flex; flex-direction: column; gap: 6px; }

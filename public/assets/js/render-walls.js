@@ -421,6 +421,9 @@
       case 'bed': return [{ w: w, d: 2.1, z0: 0, z1: 0.5 }, { w: w, d: 0.08, z0: 0, z1: 1.05, off: -1.01 }];
       case 'closet': return [{ w: w, d: 0.6, z0: 0, z1: Math.max(1.8, H - 0.02) }];
       case 'display': return [{ w: w, d: 0.4, z0: 0, z1: 1.9 }];
+      case 'wardrobe': return [{ w: w, d: 0.6, z0: 0, z1: Math.min(2.0, H - 0.05) }];   // 옷장 (천장까지 안 감)
+      case 'bookcase': return [{ w: w, d: 0.3, z0: 0, z1: Math.min(1.8, H - 0.05) }];   // 책장
+      case 'shelf': return [{ w: w, d: 0.25, z0: 1.06, z1: 1.1 }, { w: w, d: 0.25, z0: 1.46, z1: 1.5 }];   // 벽 선반 두 단 (높이 = 위 칸 높이)
       case 'fridge': return [{ w: w, d: 0.7, z0: 0, z1: Math.max(1.8, H - 0.02) }];   // 천장까지
       case 'range': return [{ w: w, d: 0.6, z0: 0, z1: Math.max(1.8, H - 0.02) }];
       case 'base': return [{ w: w, d: 0.6, z0: 0, z1: 0.85 }];   // 하부장 + 상판 높이
@@ -429,6 +432,11 @@
       case 'toilet': return [{ w: Math.max(0.38, w), d: 0.2, z0: 0, z1: 0.78, off: -0.25 }, { w: Math.max(0.36, w - 0.04), d: 0.5, z0: 0, z1: 0.42, off: 0.1 }];   // 물탱크 + 앉는 곳
       case 'basin': return [{ w: w, d: 0.5, z0: 0, z1: 0.85 }];   // 하부장 (거울은 '거울'로 따로)
       case 'mirror': return [{ w: w, d: 0.03, z0: 0.3, z1: Math.min(2.0, H - 0.1), shine: true }];   // 벽에 붙는 큰 거울 (세면대 앞이면 아래는 하부장에 가려짐)
+      case 'chandelier': var hb = f && f.h ? Math.min(f.h, H - 0.6) : 0.6; return [{ w: 0.03, d: 0.03, z0: H - 0.25, z1: H - 0.01 }, { w: w, d: w, z0: H - 0.25 - hb, z1: H - 0.25 }];   // 천장 고리 + 몸통
+      case 'clock': var zc = f && f.h ? f.h : 1.8; return [{ w: w, d: 0.05, z0: Math.max(0.05, zc - w / 2), z1: Math.min(H - 0.05, zc + w / 2) }];   // 벽시계 (가운데 높이)
+      case 'sconce': var zs = f && f.h ? f.h : 1.7; return [{ w: w, d: 0.15, z0: Math.max(0.05, zs - 0.12), z1: Math.min(H - 0.05, zs + 0.12) }];   // 벽조명
+      case 'lamp': return [{ w: w * 0.6, d: w * 0.6, z0: 0, z1: 0.03 }, { w: 0.04, d: 0.04, z0: 0.03, z1: 1.25 }, { w: w, d: w, z0: 1.25, z1: 1.6 }];   // 받침 · 기둥 · 갓
+      case 'marble': case 'tile': case 'brick': return [];   // 벽 마감(대리석벽·타일벽·파벽)은 밑그림에 그리지 않음 — 글로만 전함
       default: return [];
     }
   }
@@ -450,7 +458,7 @@
       if (dk !== 1) parts.forEach(function (pt) { pt.d *= dk; if (pt.off) pt.off *= dk; });
       // 높이: 천장까지 가는 것은 그 높이까지, 거실장은 장 높이(TV는 그만큼 위아래로), 침대는 매트리스 높이 기준, 나머지는 가장 높은 곳 기준
       var hh = Number(f.h);
-      if (f.k !== 'part' && isFinite(hh) && hh > 0 && parts.length) {
+      if (['part', 'chandelier', 'clock', 'sconce'].indexOf(f.k) < 0 && isFinite(hh) && hh > 0 && parts.length) {   // 가벽·매다는 것·벽에 거는 것은 위에서 높이를 씀
         var top = Math.max.apply(null, parts.map(function (pt) { return pt.z1; }));
         if (top >= wl.h - 0.05) parts.forEach(function (pt) { if (pt.z1 >= wl.h - 0.05) pt.z1 = Math.min(hh, wl.h - 0.01); });
         else if (f.k === 'tv') { var dz = hh - parts[0].z1; parts[0].z1 = hh; parts.slice(1).forEach(function (pt) { pt.z0 += dz; pt.z1 = Math.min(wl.h - 0.01, pt.z1 + dz); }); }
@@ -565,7 +573,23 @@
     return { w: OW, h: OH, data: out };
   }
 
-  return { KINDS: KINDS, KIND: KIND, HOLE: HOLE, CEIL: CEIL, EYE: EYE, FOV: FOV, MAX_SEGS: MAX_SEGS, GUIDE_W: GUIDE_W, GUIDE_H: GUIDE_H,
+  /**
+   * 카메라(a)에서 점(b)까지 벽(문·창·뚫림은 빼고)에 막히는지 — 도면 비율 좌표 0~1. 점 바로 앞(5cm)에서 닿는 벽은 셈하지 않음 (벽에 붙은 가구·벽 마감)
+   */
+  function blocked(wl, ax, ay, bx, by) {
+    if (!wl || !Array.isArray(wl.s)) return false;
+    var ar = wl.ar || 1, m = wl.m || 12, px = ax, py = ay * ar, rx = bx - ax, ry = (by - ay) * ar, len = Math.hypot(rx, ry);
+    if (len < 1e-9) return false;
+    var tmax = 1 - 0.05 / m / len;
+    return wl.s.some(function (g) {
+      if (g[4] !== 'w') return false;
+      var qx = g[0], qy = g[1] * ar, sx = g[2] - g[0], sy = (g[3] - g[1]) * ar, den = rx * sy - ry * sx;
+      if (Math.abs(den) < 1e-12) return false;
+      var t = ((qx - px) * sy - (qy - py) * sx) / den, u = ((qx - px) * ry - (qy - py) * rx) / den;
+      return t > 1e-6 && t < tmax && u >= 0 && u <= 1;
+    });
+  }
+  return { KINDS: KINDS, KIND: KIND, HOLE: HOLE, CEIL: CEIL, EYE: EYE, FOV: FOV, MAX_SEGS: MAX_SEGS, GUIDE_W: GUIDE_W, GUIDE_H: GUIDE_H, blocked: blocked,
     clean: clean, has: has, segLen: segLen, metres: metres, nearSeg: nearSeg, projLine: projLine, cut: cut,
     straighten: straighten, refine: refine, joinEnds: joinEnds, scaleOf: scaleOf, fromAI: fromAI,
     EXTRACT: EXTRACT, SCHEMA: SCHEMA, parseJSON: parseJSON, salvage: salvage, parseAI: parseAI, cleanAI: cleanAI, faces: faces, raster: raster };

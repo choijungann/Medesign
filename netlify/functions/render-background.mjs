@@ -83,7 +83,7 @@ const fail = (ids, msg) => (ids.length ? patch(ids, { status: 'failed', error: S
 // 답의 id가 하나도 안 맞고 개수가 같으면 순서대로 맞춤.
 // 그림마다 관리화면에서 도면을 눌러 찍은 카메라 위치(input.cam)가 있으면 같이 보냄
 // 3D 밑그림(input.guide)을 받아 온 그림은 그 밑그림도 'guide v1' 처럼 이름 붙여 같이 보냄 (guides: 그림 줄 id → 그림)
-const vids = (rows, guides) => rows.map((x, i) => { const c = RP.cleanInput(x.input); return { id: 'v' + (i + 1), view: x.view, cam: c.cam, mark: !!c.camMark, guide: !!(guides && guides.get(x.id)) }; });
+const vids = (rows, guides) => rows.map((x, i) => { const c = RP.cleanInput(x.input); return { id: 'v' + (i + 1), view: x.view, cam: c.cam, vis: c.vis, mark: !!c.camMark, guide: !!(guides && guides.get(x.id)) }; });
 // 현재 집 사진·자재 사진 (pics = { refs: [{ view, img }], mats: [{ text, img }] }) — agentText 의 'current photo n', 'material sample n' 과 같은 순서
 const picParts = (pics, claude) => {
   const one = (label, g) => (claude ? [{ type: 'text', text: label }, { type: 'image', source: { type: 'base64', media_type: g.mime, data: g.b64 } }] : [{ text: label }, { inline_data: { mime_type: g.mime, data: g.b64 } }]);
