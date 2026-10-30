@@ -37,11 +37,14 @@
   function titleOf(e) { return [e && e.customer_name, K.estTitle(e)].filter(Boolean).join(' · ').slice(0, 120); }
   // 견적서가 마지막으로 불러온 뒤에 고쳐졌는지
   function estChanged(p, e) { return !!(e && (!p.est_synced_at || ms(e.updated_at) > ms(p.est_synced_at) + 1000)); }
-  function blankDoc() { return { size: '', sizeEst: '', items: [], custom: [], style: '', memo: '', views: ['overview'] }; }
+  function blankDoc() { return { size: '', sizeEst: '', items: [], custom: [], style: '', memo: '', views: ['overview'], cams: {} }; }
   function normDoc(d) {
     d = Object.assign(blankDoc(), d || {});
     d.items = Array.isArray(d.items) ? d.items : []; d.custom = Array.isArray(d.custom) ? d.custom : [];
     d.views = (Array.isArray(d.views) ? d.views : []).filter(function (k) { return RP.viewOf(k); });
+    // 카메라 위치: 공간마다 { x, y, tx, ty } (도면 그림 안의 비율 0~1, 전체 조감도는 없음)
+    var cams = {}; Object.keys(d.cams && typeof d.cams === 'object' ? d.cams : {}).forEach(function (k) { var c = RP.camOf(d.cams[k]); if (c && k !== 'overview' && RP.viewOf(k)) cams[k] = c; });
+    d.cams = cams;
     return d;
   }
   /** 견적서 내용을 작업에 넣기 (keep: 같은 견적서를 다시 불러올 때 넣기/빼기를 그대로) → 바뀐 점 목록 */
@@ -187,7 +190,7 @@
     page.className = 'page rd-page';
     app.innerHTML = ''; app.appendChild(page);
     var d = p.doc;
-    var st = { rows: images.slice().sort(byNewest), urls: {}, working: false, timer: null, saveT: null, saving: null, planBusy: false, open: {}, pal: '' };
+    var st = { rows: images.slice().sort(byNewest), urls: {}, working: false, timer: null, saveT: null, saving: null, planBusy: false, open: {}, pal: '', cam: '', camStep: '' };
 
     /* ----- 저장 (고칠 때마다 잠깐 뒤에 저절로) ----- */
     function persist(now) {
@@ -276,11 +279,56 @@
         '<div class="field rd-size"><label for="rd-size">평수</label><div class="est-suffix"><input class="input" id="rd-size" inputmode="decimal" maxlength="6" value="' + esc(d.size) + '" placeholder="예) 32"><span>평</span></div></div>' +
         '</div>';
     }
+    /* ----- 카메라 위치: 공간 단추를 누르고 도면에서 서 있을 곳 → 바라볼 곳을 차례로 누름 ----- */
+    function camKeys() { return picked().filter(function (k) { return k !== 'overview'; }); }
+    function camRow() {
+      var ks = camKeys(); if (!ks.length || !p.plan_path) return '';
+      if (st.cam && ks.indexOf(st.cam) < 0) { st.cam = ''; st.camStep = ''; }
+      var tip = !st.cam ? '' : '<div class="rd-cam-tip" role="status"><span><b>' + esc(viewName(st.cam)) + '</b> · ' + (st.camStep === 'dir' ? '바라볼 쪽을 누르세요' : '도면에서 서 있을 곳을 누르세요') + '</span>' +
+        (d.cams[st.cam] ? '<button type="button" class="rd-cam-clear" data-camclear>자동으로</button>' : '') + '</div>';
+      return '<div class="rd-cam"><span class="rd-cam-l" id="rd-cam-l">카메라 위치 <span class="opt">(선택)</span></span>' +
+        '<div class="rd-cam-chips" role="group" aria-labelledby="rd-cam-l">' + ks.map(function (k) {
+          var on = st.cam === k, set = !!d.cams[k];
+          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (set ? ' set' : '') + '" data-cam="' + esc(k) + '" aria-pressed="' + on + '">' + (set ? I.check : '') + '<span>' + esc(viewName(k)) + '</span></button>';
+        }).join('') + '</div>' + tip + '</div>';
+    }
+    // 도면 위에 카메라 표시 (그림과 같은 비율로 겹치는 svg — 도면은 object-fit: contain)
+    function drawCams() {
+      var img = $('#rd-plan-img', page), svg = $('#rd-cam-svg', page);
+      if (!img || !svg) return;
+      if (!img.naturalWidth) { img.addEventListener('load', drawCams, { once: true }); return; }
+      // 표시 크기를 화면 픽셀로 맞춤 (도면이 커도 작아도 점·글자가 같은 크기로 보이게)
+      var W = img.naturalWidth, H = img.naturalHeight, bx = img.getBoundingClientRect(), sc = Math.min(bx.width / W, bx.height / H), R = sc > 0 ? 1 / sc : Math.max(W, H) / 400;
+      svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      var mk = function (id) { return '<marker id="' + id + '" class="' + id + '" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0 10 5 0 10z"/></marker>'; };
+      svg.innerHTML = '<defs>' + mk('rd-ah') + mk('rd-ah-on') + '</defs>' +
+        camKeys().filter(function (k) { return d.cams[k]; }).map(function (k) {
+          var c = d.cams[k], x = c.x * W, y = c.y * H, on = st.cam === k ? ' on' : '';
+          var arrow = c.tx != null ? '<line x1="' + x + '" y1="' + y + '" x2="' + (c.tx * W) + '" y2="' + (c.ty * H) + '" stroke-width="' + (2.5 * R) + '" marker-end="url(#rd-ah' + (on ? '-on' : '') + ')"/>' : '';
+          return '<g class="rd-cam-mk' + on + '">' + arrow + '<circle cx="' + x + '" cy="' + y + '" r="' + (7 * R) + '" stroke-width="' + (2.5 * R) + '"/>' +
+            '<text x="' + x + '" y="' + (y - 12 * R) + '" font-size="' + (13 * R) + '" stroke-width="' + (3.5 * R) + '">' + esc(viewName(k)) + '</text></g>';
+        }).join('');
+    }
+    function drawPlan() { var el = $('#rd-plan-card', page); if (!el) return; el.outerHTML = planCard(); drawCams(); }
+    function camTap(e) {
+      var img = $('#rd-plan-img', page); if (!img || !img.naturalWidth || !st.cam) return;
+      var b = img.getBoundingClientRect(), s = Math.min(b.width / img.naturalWidth, b.height / img.naturalHeight);
+      var w = img.naturalWidth * s, h = img.naturalHeight * s, x = (e.clientX - b.left - (b.width - w) / 2) / w, y = (e.clientY - b.top - (b.height - h) / 2) / h;
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      if (st.camStep !== 'dir') { d.cams[st.cam] = RP.camOf({ x: x, y: y }); st.camStep = 'dir'; }
+      else {
+        var c = RP.camOf({ x: d.cams[st.cam].x, y: d.cams[st.cam].y, tx: x, ty: y });
+        if (c.tx == null) return;   // 서 있는 곳과 너무 가까우면 다시
+        d.cams[st.cam] = c; st.cam = ''; st.camStep = '';
+      }
+      persist(); drawPlan();
+    }
     function planCard() {
       var src = p.plan_path && st.urls[p.plan_path];
       var inp = '<input type="file" class="cf-input" id="rd-file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif"' + (st.planBusy ? ' disabled' : '') + '>';
-      return '<div class="txt-card est-card rd-plan"><span class="label ct-label">도면</span>' +
-        (p.plan_path ? '<div class="rd-plan-box">' + (src ? '<img src="' + esc(src) + '" alt="올린 도면" data-rzoom data-rname="도면">' : '<p class="hint">도면 불러오는 중…</p>') + '</div>' : '') +
+      return '<div class="txt-card est-card rd-plan" id="rd-plan-card"><span class="label ct-label">도면</span>' +
+        (p.plan_path ? '<div class="rd-plan-box' + (st.cam ? ' cam-on' : '') + '">' + (src ? '<div class="rd-cam-wrap"><img id="rd-plan-img" src="' + esc(src) + '" alt="올린 도면"' + (st.cam ? '' : ' data-rzoom data-rname="도면"') + '>' +
+          '<svg class="rd-cam-svg" id="rd-cam-svg" aria-hidden="true"' + (st.cam ? ' data-camtap' : '') + '></svg></div>' : '<p class="hint">도면 불러오는 중…</p>') + '</div>' + camRow() : '') +
         '<label class="btn btn-outline cf-add rd-plan-add' + (st.planBusy ? ' busy' : '') + '">' + I.plus + '<span>' + (st.planBusy ? '도면 올리는 중…' : p.plan_path ? '다른 도면 올리기' : '도면 사진 올리기') + '</span>' + inp + '</label>' +
         '<p class="hint">주소·동호수가 적혀 있으면 가리고 올려 주세요.</p>' +
         '</div>';
@@ -314,7 +362,9 @@
         '<div class="rd-img' + (r.status === 'done' ? '' : ' empty') + '">' + img + (old ? '<span class="rd-old">예전 공사 내용</span>' : '') + '</div>' +
         '<div class="rd-meta"><b>' + esc(name) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + (r.caption ? '<p>' + esc(r.caption) + '</p>' : '') +
         '<details class="rd-in"><summary>만든 내용 보기</summary><ul>' + (inp.lines.length ? inp.lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') : '<li>공사 내용 없음</li>') + '</ul>' +
-        ((inp.size ? '<p>평수 ' + esc(inp.size) + '평</p>' : '') + (inp.memo ? '<p>요청 사항: ' + esc(inp.memo) + '</p>' : '')) + '</details></div>' +
+        ((inp.size ? '<p>평수 ' + esc(inp.size) + '평</p>' : '') + (inp.memo ? '<p>요청 사항: ' + esc(inp.memo) + '</p>' : '') +
+          (inp.cam ? '<p>카메라: 도면에서 찍은 곳' + (inp.cam.tx != null ? '·방향' : '') + '</p>' : '') +
+          (r.status === 'done' ? '<p>' + (r.caption ? 'AI가 도면을 읽고 공간 설명을 써서 그렸어요' : '도면을 읽지 못해 기본 설명으로 그렸어요') + '</p>' : '')) + '</details></div>' +
         '<div class="rd-acts">' +
         (r.status === 'done' && src ? '<button type="button" class="btn btn-outline btn-sm" data-rsave>' + I.down + '<span>저장</span></button>' : '') +
         (busy(r) ? '' : '<button type="button" class="btn btn-outline btn-sm" data-ragain>다시 만들기</button>') +
@@ -334,7 +384,7 @@
         srcCard() + matCard() + planCard() + pickCard() + styleCard() +
         '<button type="button" class="btn btn-primary rd-go" data-rgo' + (canGo() ? '' : ' disabled') + '>' + esc(goLabel()) + '</button>' +
         '<div id="rd-results">' + listHtml() + '</div>';
-      markPart();
+      markPart(); drawCams();
     }
     function drawList() { var box = $('#rd-results', page); if (box) box.innerHTML = listHtml(); }
     function syncGo() { var b = $('[data-rgo]', page); if (b) { b.textContent = goLabel(); b.disabled = !canGo(); } }
@@ -374,7 +424,11 @@
       var made = [];
       return persist(true).then(function () {
         var input = current();
-        return DB.addRenderImages(views.map(function (v) { return { project_id: p.id, view: v, plan_path: p.plan_path, input: input, status: 'queued' }; }));
+        // 공간마다 찍어 둔 카메라 위치를 그 그림의 input 에 같이 (공사 내용 비교에는 안 씀)
+        return DB.addRenderImages(views.map(function (v) {
+          var c = v !== 'overview' && d.cams[v];
+          return { project_id: p.id, view: v, plan_path: p.plan_path, input: c ? Object.assign({}, input, { cam: c }) : input, status: 'queued' };
+        }));
       }).then(function (list) {
         made = list;
         return DB.startRenders(list.map(function (r) { return r.id; }));
@@ -397,6 +451,7 @@
         return DB.uploadRenderPlan(p.id, img.blob).then(function (path) {
           st.urls[path] = URL.createObjectURL(img.blob);
           p.plan_path = path;
+          d.cams = {}; st.cam = ''; st.camStep = '';   // 찍어 둔 카메라 위치는 예전 도면 기준이라 지움
           return persist(true);
         });
       }).then(function () {
@@ -459,7 +514,7 @@
       if (el.id === 'rd-file') { var f = el.files && el.files[0]; el.value = ''; if (f) setPlan(f); return; }
       if ((x = el.getAttribute('data-rv'))) {
         d.views = d.views.filter(function (k) { return k !== x; }); if (el.checked) d.views.push(x);
-        el.closest('.est-cbox').classList.toggle('on', el.checked); syncGo(); persist(); return;
+        el.closest('.est-cbox').classList.toggle('on', el.checked); syncGo(); persist(); drawPlan(); return;
       }
       if ((x = el.getAttribute('data-mk'))) {   // 공사 항목 전체 넣기/빼기 (일부만 넣은 항목을 누르면 전부 넣기)
         var it = itemOf(x); if (!it) return;
@@ -489,6 +544,9 @@
         var ln2 = lineOf(inp.getAttribute('data-mnkey'), inp.getAttribute('data-mn')); if (ln2) { ln2.note = inp.value; persist(); drawList(); }
         return;
       }
+      if ((x = t.closest('[data-cam]'))) { var ck = x.getAttribute('data-cam'); st.cam = st.cam === ck ? '' : ck; st.camStep = ''; return drawPlan(); }
+      if (t.closest('[data-camclear]')) { delete d.cams[st.cam]; st.cam = ''; st.camStep = ''; persist(); return drawPlan(); }
+      if (t.closest('[data-camtap]')) return camTap(e);
       if (t.closest('[data-cadd]')) return addCustom();
       if ((x = t.closest('[data-cdel]'))) { d.custom.splice(+x.getAttribute('data-cdel'), 1); persist(); return rerender(); }
       if (t.closest('[data-rgo]')) return start(picked());

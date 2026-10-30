@@ -5,9 +5,9 @@
      서버: import RP from '../../public/assets/js/render-prompts.js'
    · 순서: 관리화면 '3D 그림'에서 견적서를 고르면 공사 항목·자재를 불러옴(fromEstimate) → 넣기/빼기·직접 추가
            → 그림을 만들 때 그 내용(compose)을 그림 줄에 같이 저장 → 서버 함수가
-           ① Claude: 도면 그림 + 그 내용으로 공간마다 그림 설명(영어)을 쓰고
+           ① 글 AI(Claude, 키가 없으면 Gemini 글 모델): 도면 그림 + 그 내용으로 공간마다 그림 설명(영어)을 쓰고
            ② 그림 AI(Google Gemini): 도면 그림 + 그 설명으로 그림
-           Claude 키가 없거나 실패하면 ①을 건너뛰고 fallback() 설명으로 바로 그림
+           ①이 실패하면 fallback() 설명으로 바로 그림
    · AI에는 도면 그림과 공사 내용(항목·자재 이름, 평수, 분위기, 요청 사항)만 보냅니다. 고객 이름·연락처·주소·금액은 보내지 않습니다.
    ===================================================================== */
 (function (root, factory) {
@@ -135,11 +135,31 @@
     lines = lines.concat((doc.custom || []).map(function (c) { return t(c, CUSTOM_LEN); }).filter(Boolean)).slice(0, LINES_MAX);
     return { size: t(doc.size, 6), lines: lines, style: styleOf(doc.style).key, memo: t(doc.memo, MEMO_MAX) };
   }
+  /**
+   * 카메라 위치 (관리화면에서 도면을 눌러 찍음) — 도면 그림 안의 비율 0~1
+   * { x, y: 서 있는 곳, tx, ty: 바라보는 곳(없으면 null) } | null
+   */
+  function camOf(c) {
+    if (!c || typeof c !== 'object') return null;
+    var n = function (v) { v = Number(v); return isFinite(v) ? Math.max(0, Math.min(1, Math.round(v * 1000) / 1000)) : null; };
+    var o = { x: c.x == null ? null : n(c.x), y: c.y == null ? null : n(c.y), tx: c.tx == null ? null : n(c.tx), ty: c.ty == null ? null : n(c.ty) };
+    if (o.x == null || o.y == null) return null;
+    if (o.tx == null || o.ty == null || (Math.abs(o.tx - o.x) < 0.01 && Math.abs(o.ty - o.y) < 0.01)) { o.tx = null; o.ty = null; }
+    return o;
+  }
+  // AI에게 알려 줄 때: 도면 그림 위의 [y, x] (0~1000, 위·왼쪽부터 — Gemini가 그림 위치를 읽는 방식과 같게)
+  function camText(c) {
+    c = camOf(c); if (!c) return '';
+    var pt = function (y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; };
+    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) : ', looking in the most natural direction from there');
+  }
   /** 서버에서 받은 input 다듬기 (길이·종류 제한) */
   function cleanInput(x) {
     x = x && typeof x === 'object' ? x : {};
-    return { size: t(x.size, 6).replace(/[^0-9.]/g, ''), lines: (Array.isArray(x.lines) ? x.lines : []).slice(0, LINES_MAX).map(function (l) { return t(l, LINE_MAX); }).filter(Boolean),
+    var out = { size: t(x.size, 6).replace(/[^0-9.]/g, ''), lines: (Array.isArray(x.lines) ? x.lines : []).slice(0, LINES_MAX).map(function (l) { return t(l, LINE_MAX); }).filter(Boolean),
       style: styleOf(x.style).key, memo: t(x.memo, MEMO_MAX) };
+    var c = camOf(x.cam); if (c) out.cam = c;
+    return out;
   }
   /** 공사 내용이 같은지 (평수·공사 줄만 — 예전 내용으로 만든 그림 알아보기) */
   function sameContent(a, b) {
@@ -147,7 +167,7 @@
     return f(a) === f(b);
   }
 
-  // ① Claude에게: 도면을 읽고 공간마다 그림 설명 쓰기
+  // ① 글 AI(Claude 또는 Gemini)에게: 도면을 읽고 공간마다 그림 설명 쓰기
   var SYSTEM = [
     'You are the visualization assistant of a Korean interior remodeling company.',
     'You receive a 2D floor plan image of a Korean apartment or house, the planned work and finishes (from the company\'s estimate plus the designer\'s own notes), the views to render, a style and an optional request from the designer.',
@@ -155,14 +175,16 @@
     '',
     'Rules for every prompt:',
     '- Photorealistic interior rendering with natural daylight and realistic materials; typical Korean apartment proportions (ceiling about 2.3 m).',
-    '- Keep walls, doors, windows and room positions exactly as drawn on the plan. Say where the windows and doors are as seen from the camera.',
-    '- Whole-home overview: 3D isometric cutaway from above at about 45 degrees, ceiling removed, every room furnished appropriately.',
-    '- Single room: eye-level wide-angle view (camera about 1.5 m high) from a natural standing point inside that room.',
+    '- Keep walls, doors, windows and room positions exactly as drawn on the plan. The image model reads floor plans poorly, so describe the layout of the space in words as if the plan were not attached.',
+    '- Single room: eye-level wide-angle view (camera about 1.5 m high). First say where the camera stands and which way it looks, in plan terms (e.g. "camera stands by the kitchen island looking toward the balcony windows"). Then describe, as seen from the camera, the far wall, the left side and the right side: windows or sliding doors and what lies beyond them (e.g. balcony, flower bed), doors and which room they lead to, wide openings to neighbouring spaces (e.g. open kitchen and dining area behind or beside), and built-in elements drawn on the plan (kitchen island, partition walls or louvers, built-in wardrobes, bathtub, shower booth). Give the approximate width and depth of the space in metres from the plan\'s dimensions or areas.',
+    '- Do not add windows, doors or openings that the plan does not show. Ignore shared areas outside the home (stairs, elevators, corridors) and any title text on the plan.',
+    '- Some views come with a camera point fixed by the designer, given as [y, x] on the floor plan image normalized to 0-1000 (y from the top edge, x from the left edge), and often a point it looks toward. Use exactly that standing point and direction: work out which room the point is in and what is visible from there, and describe the view from that spot. If the point is in a different space than the view name, follow the point.',
+    '- Whole-home overview: 3D isometric cutaway from above at about 45 degrees, ceiling removed, every room furnished appropriately, with the same room arrangement as the plan.',
     '- Text in square brackets after an item is the designer\'s color/finish detail for that item (e.g. 실크 벽지 [화이트 무광] → white matte wallpaper; 강마루 [밝은 오크] → light oak flooring). Follow it exactly.',
     '- Use only the finishes from the list that apply to that space, described visually (e.g. 강마루 → light oak engineered wood flooring; 실크 벽지 → smooth matte wallpaper; 우물천장 간접조명 → recessed ceiling tray with hidden LED cove light). Do not invent brand names or built-ins that the list or plan does not suggest; ordinary movable furniture and decor are fine.',
     '- Apply the style and the designer\'s request, unless the request asks for text or anything unrelated to the interior.',
     '- Never ask for text, room labels, dimension lines, logos, watermarks or people in the image.',
-    '- At most 900 characters per prompt.',
+    '- At most 1200 characters per prompt.',
     '',
     'Also write a Korean caption (at most 50 characters) listing 2 to 4 main finishes visible in that view, e.g. "강마루 바닥 · 실크 벽지 · 우물천장 간접조명".',
     'Set "found": false only if the plan clearly has no such space (e.g. no dressing room). For 작은방 use the smallest bedroom.',
@@ -182,11 +204,11 @@
       'Style: ' + styleOf(inp.style).en,
       'Designer\'s request (Korean, optional): ' + (inp.memo || '(none)'),
       'Views to render:',
-      views.map(function (v) { var x = viewOf(v.view) || VIEWS[0]; return '- id ' + v.id + ': ' + x.en + ' (' + x.name + ')'; }).join('\n'),
+      views.map(function (v) { var x = viewOf(v.view) || VIEWS[0], c = x.key === 'overview' ? '' : camText(v.cam); return '- id ' + v.id + ': ' + x.en + ' (' + x.name + ')' + (c ? ' — designer-fixed ' + c : ''); }).join('\n'),
     ].join('\n');
   }
 
-  /** Claude 답(JSON) 읽기 → { planOk, byId: { id: { found, caption, prompt } } } (못 읽으면 null) */
+  /** 도면 읽기 답(JSON) 읽기 → { planOk, byId: { id: { found, caption, prompt } }, list: [같은 것, 답 순서대로] } (못 읽으면 null) */
   function parseAgent(text) {
     var s = String(text || ''), a = s.indexOf('{'), b = s.lastIndexOf('}');
     if (a < 0 || b <= a) return null;
@@ -195,9 +217,10 @@
     var byId = {};
     j.views.forEach(function (v) {
       if (!v || !v.id) return;
-      byId[String(v.id)] = { found: v.found !== false, caption: t(v.caption, 60), prompt: String(v.prompt || '').trim().slice(0, 1500) };
+      byId[String(v.id)] = { found: v.found !== false, caption: t(v.caption, 60), prompt: String(v.prompt || '').trim().slice(0, 1600) };
     });
-    return { planOk: j.plan_ok !== false, byId: byId };
+    var list = j.views.filter(function (v) { return v && v.id; }).map(function (v) { return byId[String(v.id)]; });
+    return { planOk: j.plan_ok !== false, byId: byId, list: list };
   }
 
   /** Claude 없이 바로 그릴 때 쓰는 설명 (inp = cleanInput 결과) */
@@ -205,7 +228,8 @@
     var v = viewOf(view) || VIEWS[0];
     var shot = v.key === 'overview'
       ? 'Create a photorealistic 3D isometric cutaway rendering of the whole home shown in the attached floor plan, seen from above at about 45 degrees with the ceiling removed. Furnish every room appropriately.'
-      : 'Create a photorealistic eye-level interior rendering of ' + v.en + ' shown in the attached floor plan, wide-angle, camera about 1.5 m high.';
+      : 'Create a photorealistic eye-level interior rendering of ' + v.en + ' shown in the attached floor plan, wide-angle, camera about 1.5 m high.' +
+        (inp.cam ? ' Viewpoint on the attached floor plan image (coordinates [y, x] normalized to 0-1000 from the top-left corner): ' + camText(inp.cam) + '.' : '');
     return [
       shot,
       'Keep walls, doors, windows and room positions exactly as drawn on the plan. Typical Korean apartment' + (inp.size ? ' of about ' + inp.size + ' pyeong (Korean unit)' : '') + ', ceiling about 2.3 m, natural daylight.',
@@ -216,10 +240,10 @@
   }
 
   // ② 그림 AI에 보낼 때 항상 덧붙이는 말
-  var FINAL = 'Use the attached floor plan only as the layout reference: the result must be a rendered interior image, not a copy of the plan. Do not draw any text, room labels, dimension lines, logos, watermarks or people.';
+  var FINAL = 'Use the attached floor plan as the layout reference for this space: keep the same wall positions, door and window locations and openings to neighbouring spaces as described above. The result must be a rendered interior image, not a copy of the plan. Do not draw any text, room labels, dimension lines, logos, watermarks or people.';
   function imagePrompt(p) { return String(p || '').trim() + '\n\n' + FINAL; }
 
   return { VIEWS: VIEWS, STYLES: STYLES, MAX_VIEWS: MAX_VIEWS, MEMO_MAX: MEMO_MAX, LINE_MAX: LINE_MAX, NOTE_MAX: NOTE_MAX, COLORS: COLORS, FINISHES: FINISHES, CUSTOM_LEN: CUSTOM_LEN, CUSTOM_MAX: CUSTOM_MAX, viewOf: viewOf, styleOf: styleOf,
-    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent,
+    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText,
     SYSTEM: SYSTEM, agentText: agentText, parseAgent: parseAgent, fallback: fallback, imagePrompt: imagePrompt };
 });

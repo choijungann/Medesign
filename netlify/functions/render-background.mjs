@@ -77,7 +77,26 @@ const patch = (ids, body, extra = '') => rest(`render_images?id=in.(${ids.join('
 });
 const fail = (ids, msg) => (ids.length ? patch(ids, { status: 'failed', error: String(msg).slice(0, 300) }).catch(() => null) : null);
 
-/* ---------- ① Claude: 도면 읽고 그림 설명 쓰기 ---------- */
+/* ---------- ① 도면 읽고 그림 설명 쓰기 ---------- */
+// 그림 줄 id(긴 uuid) 대신 v1, v2… 로 보내고(AI가 id를 잘못 옮겨 적어 설명이 버려지는 일 줄이기) 돌아오면 다시 맞춤.
+// 답의 id가 하나도 안 맞고 개수가 같으면 순서대로 맞춤.
+// 그림마다 관리화면에서 도면을 눌러 찍은 카메라 위치(input.cam)가 있으면 같이 보냄
+const vids = (rows) => rows.map((x, i) => ({ id: 'v' + (i + 1), view: x.view, cam: RP.cleanInput(x.input).cam }));
+export function mapAgent(parsed, rows) {
+  if (!parsed) return null;
+  const byId = {};
+  rows.forEach((r, i) => {
+    const a = parsed.byId['v' + (i + 1)] || parsed.byId[r.id] || (parsed.list && parsed.list.length === rows.length ? parsed.list[i] : null);
+    if (a) byId[r.id] = a;
+  });
+  return { planOk: parsed.planOk, byId };
+}
+function readAgent(text, rows, who) {
+  const out = mapAgent(RP.parseAgent(text), rows);
+  if (!out) console.log('[render] 도면 읽기 답을 읽지 못함', who, String(text || '').length);
+  else if (!Object.keys(out.byId).length) console.log('[render] 도면 읽기 답에 맞는 공간이 없음', who);
+  return out;
+}
 export async function agent(plan, inp, rows, fetchImpl = fetch) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 120e3);
@@ -90,13 +109,13 @@ export async function agent(plan, inp, rows, fetchImpl = fetch) {
         messages: [{ role: 'user', content: [
           { type: 'text', text: '도면' },
           { type: 'image', source: { type: 'base64', media_type: plan.mime, data: plan.b64 } },
-          { type: 'text', text: RP.agentText(inp, rows.map((r) => ({ id: r.id, view: r.view }))) },
+          { type: 'text', text: RP.agentText(inp, vids(rows)) },
         ] }],
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { console.log('[render] Claude 오류', res.status, (data.error && data.error.type) || ''); return null; }
-    return RP.parseAgent((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'));
+    return readAgent((data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'), rows, 'Claude');
   } catch (e) {
     console.log('[render] Claude 실패', e && e.name);
     return null;
@@ -106,20 +125,24 @@ export async function agent(plan, inp, rows, fetchImpl = fetch) {
 /* ---------- ① Gemini 글 모델로 도면 읽기 (Claude 키가 없을 때) ---------- */
 export async function agentGemini(plan, inp, rows, fetchImpl = fetch) {
   try {
-    const r = await G.generate({
-      model: G.G_TEXT_MODEL, timeoutMs: 120e3, key: G_KEY, fetchImpl,
-      body: {
-        system_instruction: { parts: [{ text: RP.SYSTEM }] },
-        contents: [{ role: 'user', parts: [
-          { text: '도면' },
-          { inline_data: { mime_type: plan.mime, data: plan.b64 } },
-          { text: RP.agentText(inp, rows.map((x) => ({ id: x.id, view: x.view }))) },
-        ] }],
-        generationConfig: { maxOutputTokens: 16000 },
-      },
-    });
+    const body = {
+      system_instruction: { parts: [{ text: RP.SYSTEM }] },
+      contents: [{ role: 'user', parts: [
+        { text: '도면' },
+        { inline_data: { mime_type: plan.mime, data: plan.b64 } },
+        { text: RP.agentText(inp, vids(rows)) },
+      ] }],
+      // JSON 으로만 답하게 (따옴표 등으로 JSON 이 깨져 설명이 버려지는 일 막기)
+      generationConfig: { maxOutputTokens: 16000, responseMimeType: 'application/json' },
+    };
+    let r = await G.generate({ model: G.G_TEXT_MODEL, timeoutMs: 120e3, key: G_KEY, fetchImpl, body });
+    if (r.status === 400 && /mime/i.test(G.errText(r.data))) {
+      delete body.generationConfig.responseMimeType;
+      r = await G.generate({ model: G.G_TEXT_MODEL, timeoutMs: 120e3, key: G_KEY, fetchImpl, body });
+    }
     if (r.status < 200 || r.status >= 300) { console.log('[render] Gemini 도면 읽기 오류', r.status, (r.data && r.data.error && r.data.error.status) || ''); return null; }
-    return RP.parseAgent(G.textOf(r.data));
+    if (G.finishOf(r.data) === 'cut') console.log('[render] Gemini 도면 읽기 답이 길어서 잘림');
+    return readAgent(G.textOf(r.data), rows, 'Gemini');
   } catch (e) {
     console.log('[render] Gemini 도면 읽기 실패', e && e.name);
     return null;
@@ -202,8 +225,8 @@ async function run(req) {
   const rows = ((await rest(`render_images?select=*&id=in.(${ids.join(',')})&status=eq.queued&order=created_at`)) || []);
   if (!rows.length) return;
   const pid = rows[0].project_id;
-  // 한 번에 부른 그림은 같은 작업·같은 도면·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게)
-  const key = (r) => JSON.stringify([r.project_id, r.plan_path, RP.cleanInput(r.input)]);
+  // 한 번에 부른 그림은 같은 작업·같은 도면·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게). 카메라 위치는 그림마다 달라도 됨
+  const key = (r) => { const c = RP.cleanInput(r.input); delete c.cam; return JSON.stringify([r.project_id, r.plan_path, c]); };
   const mine = rows.filter((r) => key(r) === key(rows[0]));
   await fail(rows.filter((r) => !mine.includes(r)).map((r) => r.id), '다시 만들어 주세요.');
   if (!G_KEY) return fail(mine.map((r) => r.id), '그림 AI 키(GEMINI_API_KEY)가 아직 설정되지 않았어요. 앤에게 알려 주세요.');
@@ -235,7 +258,8 @@ async function draw(pid, claimed, cids) {
   const inp = RP.cleanInput(claimed[0].input);
 
   // ① 도면 읽기 (Claude, Claude 키가 없으면 Gemini 글 모델 — 실패하면 정해 둔 설명으로)
-  const plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, claimed) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, claimed) : null;
+  let plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, claimed) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, claimed) : null;
+  if (!plan1 && PROVIDER === 'anthropic' && G_KEY) { console.log('[render] Claude 도면 읽기 실패 → Gemini로 다시'); plan1 = await agentGemini(plan, inp, claimed); }
   if (plan1 && !plan1.planOk) return fail(cids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.');
 
   // ② 두 장씩 동시에 그리기
@@ -245,7 +269,7 @@ async function draw(pid, claimed, cids) {
       const v = RP.viewOf(r.view) || RP.VIEWS[0];
       const a = plan1 && plan1.byId[r.id];
       if (a && !a.found) { await fail([r.id], `도면에서 ‘${v.name}’을(를) 찾지 못했어요.`); continue; }
-      const prompt = (a && a.prompt) || RP.fallback(inp, r.view);
+      const prompt = (a && a.prompt) || RP.fallback(RP.cleanInput(r.input), r.view);
       try {
         const img = await gemini(prompt, plan);
         const path = `renders/${pid}/${r.id}.${/png/.test(img.mime) ? 'png' : /webp/.test(img.mime) ? 'webp' : 'jpg'}`;

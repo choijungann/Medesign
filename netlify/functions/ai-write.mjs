@@ -102,12 +102,12 @@ async function viaClaude(kind, work, site, extra, pics, deadline) {
   if (!res.ok) {
     const type = (data.error && data.error.type) || '';
     console.log('[ai-write] Claude 오류', kind, res.status, type);   // 키·내용은 기록하지 않음
-    const msg = res.status === 401 || res.status === 403 ? 'AI 키가 맞지 않아요. 앤에게 알려 주세요.'
+    const msg = res.status === 401 || res.status === 403 ? 'AI 키(Claude)가 맞지 않아요. 앤에게 알려 주세요.'
       : res.status === 429 ? 'AI 사용량이 잠시 꽉 찼어요. 1~2분 뒤에 다시 눌러 주세요.'
         : res.status === 529 || res.status >= 500 ? 'AI 쪽이 잠시 바빠요. 조금 뒤에 다시 눌러 주세요.'
-          : /credit|billing/i.test(JSON.stringify(data)) ? 'AI 이용 요금(크레딧)이 부족해요. 앤에게 알려 주세요.'
+          : /credit|billing/i.test(JSON.stringify(data)) ? 'AI 이용 요금(Claude 크레딧)이 부족해요. 앤에게 알려 주세요.'
             : 'AI가 글을 쓰지 못했어요. 잠시 후 다시 눌러 주세요.';
-    return { error: msg };
+    return { error: msg, claudeFail: true };
   }
   return { text: (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n'), photos: images.length, model: data.model || MODEL, cut: data.stop_reason === 'max_tokens' };
 }
@@ -115,7 +115,7 @@ async function viaClaude(kind, work, site, extra, pics, deadline) {
 /* ---------- Gemini (Google) ---------- */
 // 저장된 시공사례 사진은 주소만 있어서, 우리 Supabase 공개 사진만 받아서 그림 데이터로 보냄 (못 받은 사진은 빼고)
 const GEMINI_MSG = {
-  key: 'AI 키가 맞지 않아요. 앤에게 알려 주세요.',
+  key: 'AI 키(Gemini)가 맞지 않아요. 앤에게 알려 주세요.',
   billing: 'AI 결제 설정이 아직 안 되어 있어요. 앤에게 알려 주세요.',
   quota: 'AI 사용량이 잠시 꽉 찼어요. 1~2분 뒤에 다시 눌러 주세요.',
   model: 'AI 모델 이름이 맞지 않아요. 앤에게 알려 주세요.',
@@ -183,11 +183,18 @@ export default async (req) => {
       if (!work) return json(404, { ok: false, error: '시공사례를 찾을 수 없어요.' });
       pics = (Array.isArray(work.photos) ? work.photos : []).slice(0, MAX_PHOTOS).map((p) => photoUrl(p.thumb || p.full)).filter(Boolean).map((url) => ({ url }));
     }
-    const out = PROVIDER === 'gemini' ? await viaGemini(kind, work, site, extra, pics, deadline) : await viaClaude(kind, work, site, extra, pics, deadline);
+    let used = PROVIDER;
+    let out = PROVIDER === 'gemini' ? await viaGemini(kind, work, site, extra, pics, deadline) : await viaClaude(kind, work, site, extra, pics, deadline);
+    // Claude가 안 되면(키·크레딧·오류) Gemini 키가 있을 때 Gemini로 한 번 더 — 로그에는 남김
+    if (out.claudeFail && G.G_KEY && deadline - Date.now() > 8000) {
+      console.log('[ai-write] Claude 실패 → Gemini로 다시', kind);
+      used = 'gemini';
+      out = await viaGemini(kind, work, site, extra, pics, deadline);
+    }
     if (out.error) return json(502, { ok: false, code: out.code || 'ai_error', error: out.error });
     const result = AIPrompts.parse(kind, out.text);
     if (!AIPrompts.usable(kind, result)) return json(502, { ok: false, code: 'empty', error: 'AI가 빈 글을 보냈어요. 다시 눌러 주세요.' });
-    return json(200, { ok: true, kind, result, photos: out.photos, model: out.model, provider: PROVIDER, cut: !!out.cut });
+    return json(200, { ok: true, kind, result, photos: out.photos, model: out.model, provider: used, cut: !!out.cut });
   } catch (e) {
     console.log('[ai-write] 실패', kind, e && e.name);
     if (e && e.name === 'AbortError') return json(504, { ok: false, error: 'AI가 너무 오래 걸렸어요. 사진을 줄이거나 길이를 짧게 해서 다시 눌러 주세요.' });

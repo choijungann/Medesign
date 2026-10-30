@@ -2902,6 +2902,29 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-plan-box img { display: block; width: 100%; max-height: 360px; object-fit: contain; cursor: zoom-in; }
 .rd-plan-box .hint { margin: 0; padding: 18px; text-align: center; }
 .rd-plan .hint { margin: 8px 0 16px; }
+/* 카메라 위치 (2026-10-30): 공간 단추 → 도면에서 서 있을 곳 → 바라볼 곳 */
+.rd-cam-wrap { position: relative; }
+.rd-cam-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.rd-plan-box.cam-on { border-color: var(--accent); }
+.rd-plan-box.cam-on .rd-cam-svg { pointer-events: auto; cursor: crosshair; }
+.rd-cam-mk circle { fill: #fff; stroke: var(--ink-2); }
+.rd-cam-mk line { stroke: var(--ink-2); stroke-linecap: round; }
+.rd-cam-mk text { fill: var(--ink); stroke: #fff; paint-order: stroke; font-weight: 700; text-anchor: middle; font-family: var(--font); }
+.rd-cam-mk.on circle { fill: var(--accent); stroke: var(--accent); }
+.rd-cam-mk.on line { stroke: var(--accent); }
+.rd-ah path { fill: var(--ink-2); }
+.rd-ah-on path { fill: var(--accent); }
+.rd-cam { margin: 0 0 14px; }
+.rd-cam-l { display: block; margin-bottom: 8px; font-size: 16px; font-weight: 700; color: var(--ink); }
+.rd-cam-l .opt { font-weight: 500; color: var(--ink-3); font-size: 15px; }
+.rd-cam-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.rd-cam-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 6px 14px; border: 2px solid var(--line-2); border-radius: 22px; background: var(--surface); font: inherit; font-size: 16px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.rd-cam-chip svg { width: 18px; height: 18px; color: var(--accent); }
+.rd-cam-chip.set { border-color: var(--accent); color: var(--ink); }
+.rd-cam-chip.on { border-color: var(--primary); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--primary); color: var(--ink); }
+.rd-cam-tip { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 15.5px; color: var(--ink-2); }
+.rd-cam-tip b { color: var(--ink); }
+.rd-cam-clear { flex: none; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: 15px; font-weight: 700; color: var(--accent); cursor: pointer; }
 .est-cboxes.rd-views { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }   /* 9칸 3×3 (PC도 3칸) */
 .rd-page .textarea { min-height: 0; }
 .rd-go { min-height: 58px; font-size: 19px; margin: 0 0 8px; }
