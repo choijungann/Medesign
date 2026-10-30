@@ -1,7 +1,7 @@
 /* =====================================================================
    관리화면 — AI 글쓰기 연결 (AIKit)
    어디서 AI를 부를지 정합니다.
-   1) 실제 홈페이지(Netlify): 서버 함수 /api/ai-write → Anthropic API (Netlify 환경변수 ANTHROPIC_API_KEY, 앤의 API 키)
+   1) 실제 홈페이지(Netlify): 서버 함수 /api/ai-write → Google Gemini 또는 Anthropic Claude (Netlify 환경변수 GEMINI_API_KEY / ANTHROPIC_API_KEY, 앤의 키 — AI_PROVIDER 로 고름)
    2) claude.ai 미리보기(아티팩트) 안: 보고 있는 사람의 Claude 계정으로 바로 씀 (아티팩트의 'Claude에게 묻기' 기능, 처음 한 번 허락)
    3) 둘 다 안 되면: 요청문을 복사해서 AI 앱에 붙여 넣는 방법
    요청문은 ai-prompts.js 한 곳에서 관리합니다.

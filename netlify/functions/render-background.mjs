@@ -1,6 +1,6 @@
 // 3D 그림 만들기 — 관리화면 메뉴 '3D 그림'
 //   관리화면이 그림 한 장마다 줄(render_images, 상태 queued)을 먼저 만들고 이 함수를 부르면,
-//   ① Claude가 도면 그림 + 그 줄에 같이 적어 둔 공사 내용(input: 견적서에서 불러온 항목·자재 + 직접 넣은 내용, 평수, 분위기, 요청 사항)을 읽고
+//   ① 글 AI(Claude, 또는 Claude 키가 없으면 Gemini)가 도면 그림 + 그 줄에 같이 적어 둔 공사 내용(input: 견적서에서 불러온 항목·자재 + 직접 넣은 내용, 평수, 분위기, 요청 사항)을 읽고
 //      공간마다 그림 설명을 쓰고
 //   ② Google Gemini(그림 AI)가 도면 그림 + 그 설명으로 그림을 그려
 //   ③ 비공개 저장소(private-photos 의 renders/(3D 그림 작업 id)/…)에 넣고 줄을 '다 됨(done)'으로 바꿉니다.
@@ -14,7 +14,8 @@
 //   GEMINI_IMAGE_SIZE     (선택) 1K 또는 2K. 비우면 1K (2K는 한 장 값이 더 비쌈)
 //   GEMINI_API_BASE       (선택) 비우면 https://generativelanguage.googleapis.com/v1
 //   RENDER_DAILY_LIMIT    (선택) 24시간 동안 만들 수 있는 그림 수. 비우면 30장 (요금 폭주 방지)
-//   ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_VERSION   (AI 글쓰기와 같은 값. 없으면 ①을 건너뛰고 정해 둔 설명으로 그림)
+//   ANTHROPIC_API_KEY, ANTHROPIC_MODEL, ANTHROPIC_VERSION   (AI 글쓰기와 같은 값. 없으면 ①을 Gemini 글 모델(GEMINI_TEXT_MODEL)이 함)
+//   AI_PROVIDER           (선택) gemini 로 두면 Claude 키가 있어도 ①을 Gemini가 함 (netlify/lib/gemini.mjs)
 //   SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_KEY         (상담 신청·AI 글쓰기 함수와 같은 값)
 //
 // 보안: 로그인한 관리자(admins 표에 있는 이메일)만 쓸 수 있습니다.
@@ -22,6 +23,7 @@
 //       (작업 이름·견적서는 읽지 않음 — 그림 줄의 input 만 씀).
 //       오류가 나도 함수가 실패로 끝나지 않게 해서(Netlify가 같은 요청을 다시 돌리지 않게) 줄마다 오류 문구를 적습니다.
 import RP from '../../public/assets/js/render-prompts.js';
+import * as G from '../lib/gemini.mjs';
 
 const SB_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY || '';
@@ -33,6 +35,7 @@ const G_KEY = process.env.GEMINI_API_KEY || '';
 const G_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-nano-banana-2.1';
 const G_BASE = (process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1').replace(/\/$/, '');
 const G_SIZE = /^[12]K$/.test(process.env.GEMINI_IMAGE_SIZE || '') ? process.env.GEMINI_IMAGE_SIZE : '1K';
+const PROVIDER = G.provider();   // ① 도면 읽기를 누가: 'anthropic' | 'gemini'
 const DAILY = Math.max(1, parseInt(process.env.RENDER_DAILY_LIMIT || '30', 10) || 30);
 const PRIV = 'private-photos';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -100,6 +103,29 @@ export async function agent(plan, inp, rows, fetchImpl = fetch) {
   } finally { clearTimeout(timer); }
 }
 
+/* ---------- ① Gemini 글 모델로 도면 읽기 (Claude 키가 없을 때) ---------- */
+export async function agentGemini(plan, inp, rows, fetchImpl = fetch) {
+  try {
+    const r = await G.generate({
+      model: G.G_TEXT_MODEL, timeoutMs: 120e3, key: G_KEY, fetchImpl,
+      body: {
+        system_instruction: { parts: [{ text: RP.SYSTEM }] },
+        contents: [{ role: 'user', parts: [
+          { text: '도면' },
+          { inline_data: { mime_type: plan.mime, data: plan.b64 } },
+          { text: RP.agentText(inp, rows.map((x) => ({ id: x.id, view: x.view }))) },
+        ] }],
+        generationConfig: { maxOutputTokens: 16000 },
+      },
+    });
+    if (r.status < 200 || r.status >= 300) { console.log('[render] Gemini 도면 읽기 오류', r.status, (r.data && r.data.error && r.data.error.status) || ''); return null; }
+    return RP.parseAgent(G.textOf(r.data));
+  } catch (e) {
+    console.log('[render] Gemini 도면 읽기 실패', e && e.name);
+    return null;
+  }
+}
+
 /* ---------- ② Gemini: 그림 그리기 ---------- */
 export function geminiError(status, data) {
   const s = JSON.stringify(data || {}).slice(0, 2000);
@@ -122,20 +148,12 @@ export function pickImage(data) {
   return /SAFETY|BLOCK|PROHIBITED|RECITATION|IMAGE_OTHER/i.test(why) ? { blocked: true } : null;
 }
 export async function gemini(prompt, plan, fetchImpl = fetch) {
-  const body = JSON.stringify({
+  const body = {
     contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt) }, { inline_data: { mime_type: plan.mime, data: plan.b64 } }] }],
     generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '4:3', imageSize: G_SIZE } },
-  });
-  const call = async (base) => {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 180e3);
-    try {
-      const res = await fetchImpl(`${base}/models/${encodeURIComponent(G_MODEL)}:generateContent`, {
-        method: 'POST', signal: ctl.signal, headers: { 'content-type': 'application/json', 'x-goog-api-key': G_KEY }, body,
-      });
-      return { status: res.status, data: await res.json().catch(() => ({})) };
-    } finally { clearTimeout(timer); }
   };
+  // store:false 를 같이 보냄 (AI Studio 기록에 남기지 않기 — 모르는 주소면 빼고 다시, netlify/lib/gemini.mjs)
+  const call = (base) => G.generate({ model: G_MODEL, base, body, timeoutMs: 180e3, key: G_KEY, fetchImpl });
   let r = await call(G_BASE);
   // 주소 버전(v1/v1beta) 차이로 모델을 못 찾으면 한 번 더 (환경변수로 주소를 정했으면 그대로)
   if (r.status === 404 && !process.env.GEMINI_API_BASE) r = await call(G_BASE.replace(/\/v1$/, '/v1beta'));
@@ -216,8 +234,8 @@ async function draw(pid, claimed, cids) {
   if (!plan) return fail(cids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.');
   const inp = RP.cleanInput(claimed[0].input);
 
-  // ① 도면 읽기 (Claude 키가 없거나 실패하면 정해 둔 설명으로)
-  const plan1 = AI_KEY ? await agent(plan, inp, claimed) : null;
+  // ① 도면 읽기 (Claude, Claude 키가 없으면 Gemini 글 모델 — 실패하면 정해 둔 설명으로)
+  const plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, claimed) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, claimed) : null;
   if (plan1 && !plan1.planOk) return fail(cids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.');
 
   // ② 두 장씩 동시에 그리기

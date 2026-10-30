@@ -577,7 +577,7 @@
     deleteSchedule: function (id) {
       return sb().then(function (c) { return c.from('schedules').delete().eq('id', id).then(check); });
     },
-    /** AI 글쓰기 (서버 함수 netlify/functions/ai-write.mjs 가 Claude에 부탁)
+    /** AI 글쓰기 (서버 함수 netlify/functions/ai-write.mjs 가 Gemini 또는 Claude에 부탁)
      *  kind: 'blog' | 'instagram' | 'shorts' (시공사례 id로) · 'work' (시공사례 올리기 화면의 내용·사진으로) */
     aiWrite: function (kind, p) {
       p = p || {};

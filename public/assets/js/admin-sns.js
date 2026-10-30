@@ -2,7 +2,7 @@
    관리화면 — SNS (시공사례 → 인스타그램 피드 · 유튜브 쇼츠 대본 · 네이버 블로그 원고)
    · #/sns : 시공사례 목록에서 만들 글 고르기
    · #/sns/<시공사례id>/<instagram|shorts|blog> : AI로 쓰기 → 고치기 → 복사해서 올리기
-   · AI는 admin-ai.js(AIKit)가 부름: 실제 홈페이지는 서버 함수, 미리보기는 보고 있는 사람의 Claude 계정, 안 되면 요청문 복사
+   · AI는 admin-ai.js(AIKit)가 부름: 실제 홈페이지는 서버 함수(Gemini 또는 Claude), 미리보기는 보고 있는 사람의 Claude 계정, 안 되면 요청문 복사
    · 쓴 글은 관리자 전용 저장소(admin_settings)에 저장: blog:<id> · insta:<id> · shorts:<id> (+ 목록 표시용 sns:index)
    ===================================================================== */
 (function () {
@@ -20,7 +20,7 @@
   function putSet(key, v) { return DB.saveAdminSetting ? DB.saveAdminSetting(key, v) : Promise.resolve(); }
   function modeTip(m) {
     if (m === 'claude') return '<div class="tip sns-mode">' + I.spark + '<span>이 미리보기에서는 <b>지금 보고 있는 분의 Claude 계정</b>으로 바로 써요. 처음 한 번 허락 창이 떠요.</span></div>';
-    if (m === 'none') return '<div class="tip warn sns-mode">' + I.info + '<span>여기서는 AI를 바로 부를 수 없어서, 요청문을 복사해 AI 앱(Claude·ChatGPT)에 붙여 넣는 방법으로 써요.</span></div>';
+    if (m === 'none') return '<div class="tip warn sns-mode">' + I.info + '<span>여기서는 AI를 바로 부를 수 없어서, 요청문을 복사해 AI 앱(Gemini·ChatGPT·Claude)에 붙여 넣는 방법으로 써요.</span></div>';
     return '';
   }
 
@@ -153,7 +153,7 @@
         if (!fallback) return '';
         var prompt = window.AIKit ? window.AIKit.promptText(kind, { work: w, photos: urls, extra: opt }) : '';
         return '<section class="txt-card blog-fallback"><h2>' + esc(fallback.title) + '</h2><p class="hint">' + fallback.text + '</p>' +
-          '<ol class="blog-steps"><li>아래 <b>요청문 복사</b>를 눌러요.</li><li>Claude나 ChatGPT 앱을 열고 붙여 넣어요. 사진도 순서대로 같이 올리면 더 잘 써요.</li><li>받은 답을 복사해서 아래 <b>받은 글 붙여 넣기</b> 칸에 넣어요.</li></ol>' +
+          '<ol class="blog-steps"><li>아래 <b>요청문 복사</b>를 눌러요.</li><li>Gemini·ChatGPT·Claude 같은 AI 앱을 열고 붙여 넣어요. 사진도 순서대로 같이 올리면 더 잘 써요.</li><li>받은 답을 복사해서 아래 <b>받은 글 붙여 넣기</b> 칸에 넣어요.</li></ol>' +
           '<textarea class="textarea" id="b-prompt" rows="6" readonly>' + esc(prompt) + '</textarea>' +
           '<div class="btn-row"><button type="button" class="btn btn-primary" data-copyprompt>' + I.copy + '요청문 복사</button>' +
           '<button type="button" class="btn btn-outline" data-paste>받은 글 붙여 넣기</button></div>' +
@@ -223,7 +223,7 @@
           busy = false;
           var c = err && err.code;
           if (c === 'none' || c === 'demo') fallback = { title: '요청문을 만들었어요', text: '여기서는 AI를 바로 부를 수 없어요. 아래 방법으로 쓸 수 있어요.' };
-          else if (c === 'no_key' || c === 'no_function') fallback = { title: 'AI 키가 아직 없어서 요청문을 만들었어요', text: 'Netlify에 AI 키(ANTHROPIC_API_KEY)를 넣으면 버튼 한 번에 글이 나와요. 그 전에는 아래 방법으로 쓸 수 있어요.' };
+          else if (c === 'no_key' || c === 'no_function') fallback = { title: 'AI 키가 아직 없어서 요청문을 만들었어요', text: 'Netlify에 AI 키(GEMINI_API_KEY 또는 ANTHROPIC_API_KEY)를 넣으면 버튼 한 번에 글이 나와요. 그 전에는 아래 방법으로 쓸 수 있어요.' };
           else if (c === 'not_granted') fallback = { title: 'Claude 사용을 허락하지 않았어요', text: '다음에 다시 열면 허락 창이 다시 떠요. 지금은 아래 방법으로 쓸 수 있어요.' };
           render();
           if (!fallback && c !== 'cancelled') K.ask({ title: '글을 쓰지 못했어요', text: esc(err.message || K.friendlyError(err)), cancel: false, ok: '확인' });

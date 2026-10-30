@@ -1238,7 +1238,7 @@
           var c = err && err.code;
           if (c === 'none' || c === 'demo' || c === 'no_key' || c === 'no_function' || c === 'not_granted') {
             return ask({ title: 'AI를 바로 쓸 수 없어요', cancel: '닫기', ok: '요청문 복사',
-              text: (c === 'no_key' ? 'Netlify에 AI 키(ANTHROPIC_API_KEY)를 넣으면 버튼 한 번에 써 줘요.<br>' : '') + '요청문을 복사해서 AI 앱(Claude·ChatGPT)에 사진과 함께 붙여 넣고, 받은 글을 설명 칸에 붙여 넣어 주세요.' }).then(function (ok) {
+              text: (c === 'no_key' ? 'Netlify에 AI 키(GEMINI_API_KEY 또는 ANTHROPIC_API_KEY)를 넣으면 버튼 한 번에 써 줘요.<br>' : '') + '요청문을 복사해서 AI 앱(Gemini·ChatGPT·Claude)에 사진과 함께 붙여 넣고, 받은 글을 설명 칸에 붙여 넣어 주세요.' }).then(function (ok) {
               if (ok) copyText(window.AIKit.promptText('work', { work: f, photos: photos })).then(function (done) { if (!done) notice('복사하지 못했어요'); else notice('요청문을 복사했어요', 'AI 앱(Claude·ChatGPT)에 붙여 넣으세요.'); });
             });
           }
