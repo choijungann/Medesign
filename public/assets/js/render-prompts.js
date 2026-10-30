@@ -199,27 +199,27 @@
      { x, y: 놓은 곳(가운데), tx, ty: 앞쪽(식탁은 긴 쪽이 향하는 곳), ar, w: 가로(m) } — 그림 AI에는 카메라에서 본 자리(정면·왼쪽…)로 바꿔 전함 */
   var FURN = [
     // 거실·방
-    { key: 'tv', g: 'room', name: '거실장', en: 'TV stand (a low living-room cabinet with a TV on it)', d: 0.45, w: 2.0, tip: '앞쪽(소파 쪽)' },
-    { key: 'sofa', g: 'room', name: '소파', en: 'sofa', d: 0.95, w: 2.3, tip: '앞쪽(앉아서 보는 쪽)' },
-    { key: 'desk', g: 'room', name: '책상', en: 'desk with a chair', d: 0.6, w: 1.2, tip: '앞쪽(의자 놓는 쪽)' },
-    { key: 'bed', g: 'room', name: '침대', en: 'bed', d: 2.1, w: 1.6, tip: '발 쪽', foot: true },
-    { key: 'closet', g: 'room', name: '붙박이장', en: 'floor-to-ceiling built-in wardrobe', d: 0.6, w: 2.4, tip: '앞쪽(문 여는 쪽)' },
-    { key: 'low', g: 'room', name: '낮은 테이블', en: 'low coffee table', d: 0.6, w: 1.2, axis: true, tip: '긴 쪽이 향할 곳' },
-    { key: 'display', g: 'room', name: '장식장', en: 'display cabinet with glass doors and shelves', d: 0.4, w: 1.2, tip: '앞쪽(문 쪽)' },
+    { key: 'tv', g: 'room', name: '거실장', en: 'TV stand (a low living-room cabinet with a TV on it)', d: 0.45, w: 2.0, ht: 0.45, tip: '앞쪽(소파 쪽)' },
+    { key: 'sofa', g: 'room', name: '소파', en: 'sofa', d: 0.95, w: 2.3, ht: 0.82, tip: '앞쪽(앉아서 보는 쪽)' },
+    { key: 'desk', g: 'room', name: '책상', en: 'desk with a chair', d: 0.6, w: 1.2, ht: 0.75, tip: '앞쪽(의자 놓는 쪽)' },
+    { key: 'bed', g: 'room', name: '침대', en: 'bed', d: 2.1, w: 1.6, ht: 0.5, tip: '발 쪽', foot: true },
+    { key: 'closet', g: 'room', name: '붙박이장', en: 'built-in wardrobe', d: 0.6, w: 2.4, ht: null, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'low', g: 'room', name: '낮은 테이블', en: 'low coffee table', d: 0.6, w: 1.2, ht: 0.4, axis: true, tip: '긴 쪽이 향할 곳' },
+    { key: 'display', g: 'room', name: '장식장', en: 'display cabinet with glass doors and shelves', d: 0.4, w: 1.2, ht: 1.9, tip: '앞쪽(문 쪽)' },
     // 주방 (2026-10-30)
-    { key: 'fridge', g: 'kitchen', name: '냉장고장', en: 'floor-to-ceiling built-in refrigerator cabinet (refrigerator inside)', d: 0.7, w: 1.0, tip: '앞쪽(문 여는 쪽)' },
-    { key: 'range', g: 'kitchen', name: '렌지장', en: 'tall appliance cabinet with a built-in microwave and oven', d: 0.6, w: 0.6, tip: '앞쪽(문 여는 쪽)' },
-    { key: 'base', g: 'kitchen', name: '하부장', en: 'run of kitchen base cabinets with a countertop', d: 0.6, w: 2.4, tip: '앞쪽(서서 쓰는 쪽)', multi: true },
-    { key: 'table', g: 'kitchen', name: '식탁', en: 'dining table with chairs', d: 0.9, w: 1.6, axis: true, tip: '긴 쪽이 향할 곳' },
+    { key: 'fridge', g: 'kitchen', name: '냉장고장', en: 'built-in refrigerator cabinet (refrigerator inside)', d: 0.7, w: 1.0, ht: null, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'range', g: 'kitchen', name: '렌지장', en: 'tall appliance cabinet with a built-in microwave and oven', d: 0.6, w: 0.6, ht: null, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'base', g: 'kitchen', name: '하부장', en: 'run of kitchen base cabinets with a countertop', d: 0.6, w: 2.4, ht: 0.85, tip: '앞쪽(서서 쓰는 쪽)', multi: true },
+    { key: 'table', g: 'kitchen', name: '식탁', en: 'dining table with chairs', d: 0.9, w: 1.6, ht: 0.75, axis: true, tip: '긴 쪽이 향할 곳' },
     // 욕실 (2026-10-30)
-    { key: 'bath', g: 'bath', name: '욕조', en: 'bathtub', d: 0.75, w: 1.5, tip: '앞쪽(들어가는 쪽)' },
-    { key: 'shower', g: 'bath', name: '샤워부스', en: 'glass shower booth', d: 0.9, w: 0.9, tip: '앞쪽(문 쪽)' },
-    { key: 'toilet', g: 'bath', name: '변기', en: 'toilet', d: 0.7, w: 0.4, tip: '앞쪽(앉는 쪽)' },
-    { key: 'basin', g: 'bath', name: '세면대', en: 'washbasin on a vanity cabinet', d: 0.5, w: 0.8, tip: '앞쪽(쓰는 쪽)' },
-    { key: 'mirror', g: 'bath', name: '거울', en: 'tall wall mirror', d: 0.03, w: 0.6, tip: '앞쪽(비치는 쪽)' },
+    { key: 'bath', g: 'bath', name: '욕조', en: 'bathtub', d: 0.75, w: 1.5, ht: 0.55, tip: '앞쪽(들어가는 쪽)' },
+    { key: 'shower', g: 'bath', name: '샤워부스', en: 'glass shower booth', d: 0.9, w: 0.9, ht: 2.0, tip: '앞쪽(문 쪽)' },
+    { key: 'toilet', g: 'bath', name: '변기', en: 'toilet', d: 0.7, w: 0.4, ht: 0.78, tip: '앞쪽(앉는 쪽)' },
+    { key: 'basin', g: 'bath', name: '세면대', en: 'washbasin on a vanity cabinet', d: 0.5, w: 0.8, ht: 0.85, tip: '앞쪽(쓰는 쪽)' },
+    { key: 'mirror', g: 'bath', name: '거울', en: 'tall wall mirror', d: 0.03, w: 0.6, ht: 2.0, tip: '앞쪽(비치는 쪽)' },
     // 구조 (2026-10-30) — 기둥: 한 번만 누름(크기 = 가로), 가벽: 한쪽 끝 → 다른 쪽 끝 (높이를 정할 수 있음, 비우면 천장까지)
-    { key: 'col', g: 'struct', name: '기둥', en: 'structural column (a square pillar from floor to ceiling)', d: 0.4, w: 0.4, nodir: true, multi: true },
-    { key: 'part', g: 'struct', name: '가벽', en: 'partition wall', d: 0.12, w: 1.5, line: true, multi: true },
+    { key: 'col', g: 'struct', name: '기둥', en: 'structural column (a square pillar)', d: 0.4, w: 0.4, ht: null, nodir: true, multi: true },
+    { key: 'part', g: 'struct', name: '가벽', en: 'partition wall', d: 0.12, w: 1.5, ht: null, line: true, multi: true },
   ];
   var FURN_GROUPS = [{ g: 'room', name: '거실·방' }, { g: 'kitchen', name: '주방' }, { g: 'bath', name: '욕실' }, { g: 'struct', name: '구조' }];
   var FURN_MULTI = 6;   // 하부장·기둥·가벽은 여러 개 (#2 … #6)
@@ -240,17 +240,19 @@
    * 가구 위치 다듬기 → { tv: {…}, col: {…}, 'col#2': {…} } (없는 것은 빠짐)
    * 가벽(line): x, y = 가운데, tx, ty = 한쪽 끝, L = 길이(도면 가로 단위), h = 높이(m, 없으면 천장까지)
    */
+  // 크기: w 가로, dp 깊이(없으면 기본), h 높이(없으면 기본 — 붙박이장·기둥·가벽 등은 천장까지)
   function furnOf(f) {
     var out = {};
     if (!f || typeof f !== 'object' || Array.isArray(f)) return out;
     furnKeys(f).forEach(function (key) {
       var d = furnKey(key).d, src = f[key], c = camOf(src); if (!c) return;
       var w = Number(src.w); c.w = isFinite(w) && w >= 0.2 && w <= 8 ? Math.round(w * 100) / 100 : d.w;
+      var dp = Number(src.dp); if (src.dp != null && src.dp !== '' && !d.line && !d.nodir && isFinite(dp) && dp >= 0.02 && dp <= 5) c.dp = Math.round(dp * 100) / 100;
+      var h = Number(src.h); if (src.h != null && src.h !== '' && isFinite(h) && h >= 0.1 && h <= 4) c.h = Math.round(h * 100) / 100;
       if (d.nodir) { c.tx = null; c.ty = null; }
       if (d.line) {
         if (c.tx == null) return;
         var L = Number(src.L); c.L = isFinite(L) && L > 0.003 && L <= 2 ? Math.round(L * 1e4) / 1e4 : Math.round(Math.hypot(c.tx - c.x, (c.ty - c.y) * (c.ar || 1)) * 2e4) / 1e4;
-        var h = Number(src.h); if (src.h != null && src.h !== '' && isFinite(h) && h >= 0.3 && h <= 4) c.h = Math.round(h * 100) / 100;
       }
       out[key] = c;
     });
@@ -259,14 +261,23 @@
   function pt1000(y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; }
   function furnArt(d) { return d.multi ? 'a ' : 'the '; }
   function heightTxt(f) { return f.h ? ', ' + f.h + ' m high (not reaching the ceiling)' : ', reaching the ceiling'; }
+  // 크기 글: 'about 2.3 m wide, 0.9 m deep, 0.8 m high' (깊이·높이는 디자이너가 정했을 때만)
+  function sizeTxt(d, f) {
+    if (d.line) return '';
+    var a = [d.nodir ? f.w + ' m square' : f.w + ' m wide'];
+    if (f.dp) a.push(f.dp + ' m deep');
+    if (d.ht == null) a.push(f.h ? f.h + ' m high (not reaching the ceiling)' : 'reaching the ceiling');   // 붙박이장·냉장고장·렌지장·기둥
+    else if (f.h) a.push(f.h + ' m high');
+    return 'about ' + a.join(', ');
+  }
   // 가구 하나: 도면 기준 (도면 읽기 AI·전체 조감도용)
   function furnPlanOne(key, f, scale) {
     var d = furnDef(key), i = dirIdx(f);
-    if (d.nodir) return furnArt(d) + d.en + ' (' + d.name + ', about ' + f.w + ' m square) at ' + pt1000(f.y, f.x);
+    if (d.nodir) return furnArt(d) + d.en + ' (' + d.name + ', ' + sizeTxt(d, f) + ') at ' + pt1000(f.y, f.x);
     if (d.line) return furnArt(d) + d.en + ' (' + d.name + ') from ' + pt1000(2 * f.y - f.ty, 2 * f.x - f.tx) + ' to ' + pt1000(f.ty, f.tx) + (scale > 0 ? ', about ' + (Math.round(f.L * scale * 10) / 10) + ' m long' : '') + heightTxt(f);
     var dir = i < 0 ? '' : d.axis ? ', its long side running ' + (i % 4 === 0 ? 'north-south (top to bottom of the plan image)' : i % 4 === 2 ? 'east-west (left to right of the plan image)' : 'diagonally')
       : ', its ' + (d.foot ? 'foot end' : 'front') + ' facing ' + COMPASS[i] + ' (the ' + DIRS[i] + ' of the plan image)';
-    return furnArt(d) + d.en + ' (' + d.name + ', about ' + f.w + ' m wide) centred at ' + pt1000(f.y, f.x) + dir;
+    return furnArt(d) + d.en + ' (' + d.name + ', ' + sizeTxt(d, f) + ') centred at ' + pt1000(f.y, f.x) + dir;
   }
   /** 가구 전부: 도면 기준 한 줄 | '' (scale: 도면 가로 전체 길이 m — 가벽 길이를 쓸 때) */
   function furnPlan(furn, scale) {
@@ -298,14 +309,14 @@
       var dist = scale > 0 ? ', about ' + (Math.round(Math.hypot(f.x - cam.x, (f.y - cam.y) * ar) * scale * 10) / 10) + ' m from the camera' : '';
       var face = '';
       if (d.line) face = ', ' + axisTxt(f) + (scale > 0 ? ', about ' + (Math.round(f.L * scale * 10) / 10) + ' m long' : '') + heightTxt(f);
-      else if (d.nodir) face = ', about ' + f.w + ' m square';
+      else if (d.nodir) face = ', ' + sizeTxt(d, f);
       else if (f.tx != null) {
         var fd = rel(f.x, f.y, f.tx, f.ty), a = Math.abs(fd);
         if (d.axis) face = ', its long side ' + axisTxt(f);
         else if (d.foot) face = a >= 135 ? ', its foot end toward the camera' : a <= 45 ? ', its headboard toward the camera' : ', its foot end pointing ' + (fd > 0 ? 'right' : 'left');
         else face = a >= 135 ? ', facing the camera' : a <= 45 ? ', facing away from the camera (its back toward the camera)' : ', facing ' + (fd > 0 ? 'right' : 'left');
       }
-      out.push(furnArt(d) + d.en + ' ' + where + dist + face);
+      out.push(furnArt(d) + d.en + (d.line || d.nodir ? '' : ' (' + sizeTxt(d, f) + ')') + ' ' + where + dist + face);
     });
     return out.join('; ');
   }

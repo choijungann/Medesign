@@ -2979,7 +2979,12 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-guide span { padding: 0 8px 6px; }
 .rd-guide-none { margin: 0 0 14px; font-size: 15px; color: var(--ink-3); }
 /* 가구 위치 */
-.rd-furn-tip { flex-wrap: wrap; }
+.rd-furn-tip { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+.rd-furn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.rd-furn-row .rd-wbtn { min-height: 40px; padding: 4px 10px; background: var(--surface); }
+.rd-furn-row .rd-wnum .input { width: 64px; min-height: 40px; padding: 4px 8px; }
+.rd-furn-row .rd-wnum .input::placeholder { color: var(--ink-3); }
+.rd-furn-x { margin-left: auto; }
 .rd-furn-g { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
 .rd-furn-gl { flex: none; width: 56px; padding-top: 11px; font-size: 14.5px; font-weight: 700; color: var(--ink-3); }
 .rd-furn-g .rd-cam-chips { flex: 1; min-width: 0; }

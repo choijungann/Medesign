@@ -339,29 +339,43 @@
        기둥은 한 번(놓을 곳)만, 가벽은 한쪽 끝 → 다른 쪽 끝. 하부장·기둥·가벽은 여러 개(st.furn = 'col', 'col#2' …) */
     function keysOf(kind) { return RP.furnKeys(d.furn).filter(function (k) { return k.split('#')[0] === kind; }); }
     function nextKey(kind) { for (var n = 1; n <= RP.FURN_MULTI; n++) { var k = n === 1 ? kind : kind + '#' + n; if (!d.furn[k]) return k; } return ''; }
-    function furnTipText(def) {
-      if (def.line) return st.furnStep === 'dir' ? '다른 쪽 끝을 누르세요' : '도면에서 한쪽 끝을 누르세요';
-      if (def.nodir) return '도면에서 놓을 곳을 누르세요';
-      return st.furnStep === 'dir' ? esc(def.tip) + '을 누르세요' : '도면에서 놓을 곳을 누르세요';
+    function furnTipText(def, cur) {
+      if (st.furnStep === 'dir') return def.line ? '다른 쪽 끝을 누르세요' : esc(def.tip) + '을 누르세요';
+      if (st.furnStep === 'redraw' || (def.line && !cur)) return '도면에서 한쪽 끝을 누르세요';
+      if (cur) return '도면을 누르면 그 자리로 옮겨요';
+      return '도면에서 놓을 곳을 누르세요';
+    }
+    var ROT_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v6h6"/><path d="M4.5 10A8 8 0 1 1 6 17"/></svg>';
+    var ROT_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v6h-6"/><path d="M19.5 10A8 8 0 1 0 18 17"/></svg>';
+    function numIn(attr, label, val, ph, name) {
+      return '<label class="rd-wnum">' + label + '<input class="input" ' + attr + ' inputmode="decimal" maxlength="4" value="' + (val != null ? Number(val).toFixed(2).replace(/0$/, '') : '') + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + ' aria-label="' + esc(name + ' ' + label) + '(미터)"><span>m</span></label>';
     }
     function furnRow() {
       if (!p.plan_path || !st.urls[p.plan_path]) return '';
       var def = st.furn && RP.furnDef(st.furn), cur = st.furn && d.furn[st.furn], kind = def && def.key;
-      var tabs = '', tools = '';
-      if (def && def.multi) {   // 여러 개: 1 · 2 · 3 … + 하나 더
-        var ks = keysOf(kind);
-        if (ks.length > 1 || (ks.length && !cur)) tabs = '<span class="rd-furn-tabs" role="group" aria-label="' + esc(def.name) + ' 고르기">' + ks.map(function (k, i) {
+      var ed = '';
+      if (def) {
+        var ks = keysOf(kind), rowA = '', rowB = '', rowC = '';
+        if (cur && !st.furnStep) {
+          // 방향: 90° 돌리기 · 방향 다시 찍기 (가벽은 다시 긋기)
+          if (!def.nodir) rowA = '<button type="button" class="rd-wbtn" data-frot="-90" aria-label="왼쪽으로 90도 돌리기">' + ROT_L + '<span>90°</span></button>' +
+            '<button type="button" class="rd-wbtn" data-frot="90" aria-label="오른쪽으로 90도 돌리기">' + ROT_R + '<span>90°</span></button>' +
+            '<button type="button" class="rd-wbtn" data-fredo>' + (def.line ? '다시 긋기' : '방향 찍기') + '</button>';
+          // 크기
+          var nm = def.name, ht = def.ht == null ? '천장' : String(def.ht);
+          if (def.line) rowB = (hasWalls() ? numIn('data-fl', '길이', cur.L * d.walls.m, '', nm) : '') + numIn('data-fh', '높이', cur.h, '천장', nm);
+          else if (def.nodir) rowB = numIn('data-fw', '크기', cur.w, '', nm) + numIn('data-fh', '높이', cur.h, ht, nm);
+          else rowB = numIn('data-fw', '가로', cur.w, '', nm) + numIn('data-fdp', '깊이', cur.dp, String(def.d), nm) + numIn('data-fh', '높이', cur.h, ht, nm);
+        }
+        if (def.multi && (ks.length > 1 || (ks.length && !cur))) rowC += '<span class="rd-furn-tabs" role="group" aria-label="' + esc(def.name) + ' 고르기">' + ks.map(function (k, i) {
           return '<button type="button" class="rd-furn-tab' + (k === st.furn ? ' on' : '') + '" data-furnpick="' + esc(k) + '" aria-pressed="' + (k === st.furn) + '">' + (i + 1) + '</button>';
         }).join('') + '</span>';
-        if (cur && nextKey(kind)) tools += '<button type="button" class="rd-cam-clear" data-furnmore="' + esc(kind) + '">하나 더</button>';
+        if (def.multi && cur && nextKey(kind)) rowC += '<button type="button" class="rd-cam-clear" data-furnmore="' + esc(kind) + '">하나 더</button>';
+        if (cur && !st.furnStep) rowC += '<button type="button" class="rd-cam-clear rd-furn-x" data-furnclear>빼기</button>';
+        if (st.furnStep && cur) rowC += '<button type="button" class="rd-cam-clear rd-furn-x" data-furncancel>그만</button>';
+        ed = [rowA, rowB, rowC].filter(Boolean).map(function (r) { return '<div class="rd-furn-row">' + r + '</div>'; }).join('');
       }
-      if (cur && st.furnStep !== 'dir') {
-        tools = (def.line ? '<label class="rd-wnum">높이<input class="input" data-fh inputmode="decimal" maxlength="4" value="' + (cur.h ? cur.h.toFixed(1) : '') + '" placeholder="천장" aria-label="' + esc(def.name) + ' 높이(미터, 비우면 천장까지)"><span>m</span></label>'
-          : '<label class="rd-wnum">' + (def.nodir ? '크기' : '가로') + '<input class="input" data-fw inputmode="decimal" maxlength="4" value="' + cur.w.toFixed(1) + '" aria-label="' + esc(def.name) + (def.nodir ? ' 한 변 길이' : ' 가로 길이') + '(미터)"><span>m</span></label>') +
-          tools + '<button type="button" class="rd-cam-clear" data-furnclear>빼기</button>';
-      }
-      var tip = !def ? '' : '<div class="rd-cam-tip rd-furn-tip" role="status"><span><b>' + esc(def.name) + (def.multi && keysOf(kind).length > 1 && cur ? ' ' + (keysOf(kind).indexOf(st.furn) + 1) : '') + '</b> · ' + furnTipText(def) + '</span>' +
-        (tabs || tools ? '<span class="rd-furn-tools">' + tabs + tools + '</span>' : '') + '</div>';
+      var tip = !def ? '' : '<div class="rd-cam-tip rd-furn-tip" role="status"><span class="rd-furn-msg"><b>' + esc(def.name) + (def.multi && keysOf(kind).length > 1 && cur ? ' ' + (keysOf(kind).indexOf(st.furn) + 1) : '') + '</b> · ' + furnTipText(def, cur) + '</span>' + ed + '</div>';
       return '<div class="rd-cam rd-furn"><span class="rd-cam-l" id="rd-furn-l">가구·구조 위치 <span class="opt">(선택)</span></span>' +
         RP.FURN_GROUPS.map(function (gr) {   // 거실·방 / 주방 / 욕실 / 구조
           return '<div class="rd-furn-g"><span class="rd-furn-gl" id="rd-furn-' + gr.g + '">' + esc(gr.name) + '</span>' +
@@ -370,6 +384,15 @@
               return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (n ? ' set' : '') + '" data-furn="' + esc(f.key) + '" aria-pressed="' + on + '">' + (n ? I.check : '') + '<span>' + esc(f.name) + (n > 1 ? ' ' + n : '') + '</span></button>';
             }).join('') + '</div></div>';
         }).join('') + tip + '</div>';
+    }
+    // 놓은 가구 돌리기 (도면 그림 기준 시계 방향 +, 가벽은 가운데를 축으로)
+    function rotFurn(key, deg) {
+      var c = d.furn[key], f = RP.furnDef(key); if (!c || c.tx == null) return;
+      var ar = c.ar || 1, dx = c.tx - c.x, dy = (c.ty - c.y) * ar, a = deg * Math.PI / 180;
+      var nx = dx * Math.cos(a) - dy * Math.sin(a), ny = dx * Math.sin(a) + dy * Math.cos(a);
+      if (!f.line) { var L = Math.hypot(nx, ny) || 1; nx = nx / L * 0.05; ny = ny / L * 0.05; }
+      var cl = function (v) { return Math.max(0, Math.min(1, v)); };
+      c.tx = cl(c.x + nx); c.ty = cl(c.y + ny / ar);
     }
     // 도면 위 가구: 벽 선이 있으면 실제 크기 네모(앞쪽은 굵은 선), 없으면 작은 네모 + 화살표. 가벽은 굵은 선, 기둥은 네모
     function furnSvg(W, H, R) {
@@ -384,7 +407,7 @@
         if (c.tx != null) { var dx = (c.tx - c.x) * W, dy = (c.ty - c.y) * H, L = Math.hypot(dx, dy); if (L) { fx = dx / L; fy = dy / L; } }
         if (f.axis) { var lx = fx, ly = fy; fx = ly; fy = -lx; }   // 식탁: 화살표 쪽이 긴 쪽
         var rx = -fy, ry = fx, hw, hd;
-        if (m) { hw = c.w / m * W / 2; hd = (f.nodir ? c.w : f.d) / m * W / 2; } else { hw = f.nodir ? 6 * R : 10 * R; hd = 6 * R; }
+        if (m) { hw = c.w / m * W / 2; hd = (f.nodir ? c.w : c.dp || f.d) / m * W / 2; } else { hw = f.nodir ? 6 * R : 10 * R; hd = 6 * R; }
         var P = function (a, b2) { return (X + rx * a + fx * b2).toFixed(1) + ',' + (Y + ry * a + fy * b2).toFixed(1); };
         var front = f.axis || f.nodir ? '' : '<line class="rd-fu-front" x1="' + P(-hw, hd).replace(',', '" y1="') + '" x2="' + P(hw, hd).replace(',', '" y2="') + '" stroke-width="' + (3.5 * R) + '"/>';
         var ax = f.axis ? rx : fx, ay = f.axis ? ry : fy, al = Math.max((f.axis ? hw : hd) + 12 * R, 22 * R);   // 앞쪽 화살표 (식탁은 긴 쪽 방향)
@@ -394,7 +417,7 @@
     }
     // 밑그림에 넣을 가구 목록 (종류 이름 k, 가벽·식탁 표시)
     function furnList() {
-      return RP.furnKeys(d.furn).map(function (key) { var f = RP.furnDef(key); return Object.assign({ k: f.key, line: !!f.line, axis: !!f.axis }, d.furn[key]); });
+      return RP.furnKeys(d.furn).map(function (key) { var f = RP.furnDef(key), c = d.furn[key]; return Object.assign({ k: f.key, line: !!f.line, axis: !!f.axis, dk: c.dp && f.d ? c.dp / f.d : 1 }, c); });
     }
     // 그림 줄에 같이 저장할 것: 가구 자리, 크기(벽 선이 있을 때), 현재 집 사진
     function extras() {
@@ -442,21 +465,26 @@
       var w = img.naturalWidth * s, h = img.naturalHeight * s, x = (e.clientX - b.left - (b.width - w) / 2) / w, y = (e.clientY - b.top - (b.height - h) / 2) / h;
       if (x < 0 || x > 1 || y < 0 || y > 1) return;
       var ar = img.naturalHeight / img.naturalWidth;   // 도면 세로/가로 — 바라보는 방위를 정확히 재려고
-      if (st.furn) {   // 가구: 놓을 곳 → 앞쪽 (가로 길이는 그대로) · 기둥은 한 번 · 가벽은 한쪽 끝 → 다른 쪽 끝
-        var fk = st.furn, fd = RP.furnDef(fk), old = d.furn[fk], fw = old ? old.w : fd.w, nf = {};
-        if (fd.line) {
+      if (st.furn) {   // 가구: 새로 놓기(놓을 곳 → 앞쪽 · 기둥은 한 번 · 가벽은 한쪽 끝 → 다른 쪽 끝) / 놓은 것은 누르면 그 자리로 옮김
+        var fk = st.furn, fd = RP.furnDef(fk), old = d.furn[fk], nf = {}, done = false, cl = function (v) { return Math.max(0, Math.min(1, v)); };
+        var base = old ? Object.assign({}, old) : { w: fd.w };
+        if (fd.line && (!old || st.furnStep)) {   // 가벽 긋기
           if (st.furnStep !== 'dir') { st.furnA = [x, y]; st.furnStep = 'dir'; return drawPlan(); }   // 한쪽 끝 (아직 저장 안 함)
-          var a0 = st.furnA || [x, y], mx = (a0[0] + x) / 2, my = (a0[1] + y) / 2;
-          nf[fk] = { x: mx, y: my, tx: x, ty: y, ar: ar, w: fw, L: Math.hypot(x - a0[0], (y - a0[1]) * ar), h: old ? old.h : null };
+          var a0 = st.furnA || [x, y];
+          nf[fk] = Object.assign(base, { x: (a0[0] + x) / 2, y: (a0[1] + y) / 2, tx: x, ty: y, ar: ar, L: Math.hypot(x - a0[0], (y - a0[1]) * ar) });
           if (!RP.furnOf(nf)[fk]) return;   // 너무 짧으면 다시
-          st.furn = ''; st.furnStep = ''; st.furnA = null;
-        } else if (fd.nodir) { nf[fk] = { x: x, y: y, ar: ar, w: fw }; st.furn = ''; st.furnStep = ''; }
-        else if (st.furnStep !== 'dir') { nf[fk] = { x: x, y: y, ar: ar, w: fw }; st.furnStep = 'dir'; }
-        else {
-          nf[fk] = { x: old.x, y: old.y, tx: x, ty: y, ar: ar, w: fw };
-          if (!RP.furnOf(nf)[fk] || RP.furnOf(nf)[fk].tx == null) return;   // 놓은 곳과 너무 가까우면 다시
-          st.furn = ''; st.furnStep = '';
+          st.furnStep = ''; st.furnA = null; done = !old;
+        } else if (old && !st.furnStep) {   // 옮기기 (방향·크기는 그대로)
+          nf[fk] = Object.assign(base, { x: x, y: y });
+          if (old.tx != null) { nf[fk].tx = cl(old.tx + x - old.x); nf[fk].ty = cl(old.ty + y - old.y); }
+        } else if (fd.nodir) { nf[fk] = Object.assign(base, { x: x, y: y, ar: ar }); done = true; }
+        else if (!old) { nf[fk] = Object.assign(base, { x: x, y: y, ar: ar }); st.furnStep = 'dir'; }   // 새로 놓기 → 앞쪽
+        else {   // 앞쪽(방향) 찍기
+          nf[fk] = Object.assign(base, { tx: x, ty: y, ar: ar });
+          var chk = RP.furnOf(nf)[fk]; if (!chk || chk.tx == null) return;   // 놓은 곳과 너무 가까우면 다시
+          done = old.tx == null; st.furnStep = '';
         }
+        if (done) { st.furn = ''; st.furnStep = ''; }   // 새로 다 놓았으면 끝 (놓은 것을 고칠 때는 그대로 골라 둠)
         d.furn = RP.furnOf(Object.assign({}, d.furn, nf)); st.gcache = {};
         persist(); return drawPlan();
       }
@@ -976,9 +1004,19 @@
         if (cf && fwv >= 0.2 && fwv <= 8) { cf.w = Math.round(fwv * 100) / 100; st.gcache = {}; persist(); drawPlan(); } else if (cf) el.value = cf.w.toFixed(1);
         return;
       }
-      if (el.hasAttribute('data-fh')) {   // 가벽 높이 (비우면 천장까지)
-        var fhv = String(el.value).trim() === '' ? null : parseFloat(String(el.value).replace(',', '.')), ch = d.furn[st.furn];
-        if (ch && (fhv == null || (fhv >= 0.3 && fhv <= 4))) { if (fhv == null) delete ch.h; else ch.h = Math.round(fhv * 100) / 100; st.gcache = {}; persist(); drawPlan(); } else if (ch) el.value = ch.h ? ch.h.toFixed(1) : '';
+      if (el.hasAttribute('data-fh') || el.hasAttribute('data-fdp')) {   // 높이·깊이 (비우면 기본 — 높이는 천장까지인 것도 있음)
+        var isH = el.hasAttribute('data-fh'), fname = isH ? 'h' : 'dp', fv = String(el.value).trim() === '' ? null : parseFloat(String(el.value).replace(',', '.')), ch = d.furn[st.furn];
+        var ok2 = fv == null || (isH ? fv >= 0.1 && fv <= 4 : fv >= 0.02 && fv <= 5);
+        if (ch && ok2) { if (fv == null) delete ch[fname]; else ch[fname] = Math.round(fv * 100) / 100; st.gcache = {}; persist(); drawPlan(); } else if (ch) el.value = ch[fname] != null ? ch[fname] : '';
+        return;
+      }
+      if (el.hasAttribute('data-fl')) {   // 가벽 길이(m) → 가운데는 그대로, 양쪽 끝을 늘이고 줄임
+        var flv = parseFloat(String(el.value).replace(',', '.')), cl2 = d.furn[st.furn];
+        if (cl2 && hasWalls() && flv >= 0.1 && flv <= 30) {
+          var nL = flv / d.walls.m, ar2 = cl2.ar || 1, hx = cl2.tx - cl2.x, hy = (cl2.ty - cl2.y) * ar2, hl = Math.hypot(hx, hy) || 1;
+          cl2.L = Math.round(nL * 1e4) / 1e4; cl2.tx = Math.max(0, Math.min(1, cl2.x + hx / hl * nL / 2)); cl2.ty = Math.max(0, Math.min(1, cl2.y + hy / hl * nL / 2 / ar2));
+          st.gcache = {}; persist(); drawPlan();
+        } else if (cl2 && hasWalls()) el.value = (cl2.L * d.walls.m).toFixed(1);
         return;
       }
       if ((x = el.getAttribute('data-rv'))) {
@@ -1025,6 +1063,9 @@
         var fk = x.getAttribute('data-furn'), same = st.furn && st.furn.split('#')[0] === fk;
         st.furn = same ? '' : (keysOf(fk)[0] || fk); st.furnStep = ''; st.furnA = null; st.cam = ''; st.camStep = ''; st.wall = false; return drawPlan();
       }
+      if ((x = t.closest('[data-frot]'))) { rotFurn(st.furn, +x.getAttribute('data-frot')); st.gcache = {}; persist(); return drawPlan(); }
+      if (t.closest('[data-fredo]')) { var rd = RP.furnDef(st.furn); st.furnStep = rd && rd.line ? 'redraw' : 'dir'; st.furnA = null; return drawPlan(); }
+      if (t.closest('[data-furncancel]')) { st.furnStep = ''; st.furnA = null; return drawPlan(); }
       if ((x = t.closest('[data-furnpick]'))) { st.furn = x.getAttribute('data-furnpick'); st.furnStep = ''; st.furnA = null; return drawPlan(); }
       if ((x = t.closest('[data-furnmore]'))) { var nk = nextKey(x.getAttribute('data-furnmore')); if (nk) { st.furn = nk; st.furnStep = ''; st.furnA = null; } return drawPlan(); }
       if (t.closest('[data-furnclear]')) {

@@ -444,7 +444,19 @@
         if (f.line) wd = Math.max(0.05, num(f.L, 0, 2, 0) * m);
       }
       var rx = -fy, ry = fx;   // 오른쪽 (앞을 보고 섰을 때)
-      furnParts(f.k, wd, wl.h, f).forEach(function (pt) {
+      var parts = furnParts(f.k, wd, wl.h, f);
+      // 깊이: 기본 깊이에 대한 비율(dk)만큼 앞뒤로 늘리고 줄임
+      var dk = num(f.dk, 0.05, 20, 1);
+      if (dk !== 1) parts.forEach(function (pt) { pt.d *= dk; if (pt.off) pt.off *= dk; });
+      // 높이: 천장까지 가는 것은 그 높이까지, 거실장은 장 높이(TV는 그만큼 위아래로), 침대는 매트리스 높이 기준, 나머지는 가장 높은 곳 기준
+      var hh = Number(f.h);
+      if (f.k !== 'part' && isFinite(hh) && hh > 0 && parts.length) {
+        var top = Math.max.apply(null, parts.map(function (pt) { return pt.z1; }));
+        if (top >= wl.h - 0.05) parts.forEach(function (pt) { if (pt.z1 >= wl.h - 0.05) pt.z1 = Math.min(hh, wl.h - 0.01); });
+        else if (f.k === 'tv') { var dz = hh - parts[0].z1; parts[0].z1 = hh; parts.slice(1).forEach(function (pt) { pt.z0 += dz; pt.z1 = Math.min(wl.h - 0.01, pt.z1 + dz); }); }
+        else { var k2 = hh / (f.k === 'bed' ? parts[0].z1 : top); parts.forEach(function (pt) { pt.z0 *= k2; pt.z1 = Math.min(wl.h - 0.01, pt.z1 * k2); }); }
+      }
+      parts.forEach(function (pt) {
         pid++;
         var ox = cx + fx * (pt.off || 0) + rx * (pt.side || 0), oy = cy + fy * (pt.off || 0) + ry * (pt.side || 0), hw = pt.w / 2, hd = pt.d / 2;
         var P = function (a, b) { return [ox + rx * a + fx * b, oy + ry * a + fy * b]; };
