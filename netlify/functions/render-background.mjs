@@ -3,6 +3,7 @@
 //   ① 글 AI(Claude, 또는 Claude 키가 없으면 Gemini)가 도면 그림 + 그 줄에 같이 적어 둔 공사 내용(input: 견적서에서 불러온 항목·자재 + 직접 넣은 내용, 평수, 분위기, 요청 사항)을 읽고
 //      공간마다 그림 설명을 쓰고
 //   ② Google Gemini(그림 AI)가 도면 그림 + 그 설명으로 그림을 그려
+//      (관리화면에서 3D 밑그림을 만든 그림은 도면 대신 그 회색 밑그림(input.guide)을 보내 구도·벽·문·창 자리를 그대로 두게 함)
 //   ③ 비공개 저장소(private-photos 의 renders/(3D 그림 작업 id)/…)에 넣고 줄을 '다 됨(done)'으로 바꿉니다.
 //   관리화면은 몇 초마다 줄 상태를 다시 읽어 그림을 보여 줍니다.
 //   그림 한 장에 몇십 초 걸릴 수 있어 '백그라운드 함수'(최대 15분, 부르면 바로 202로 대답)로 돌립니다.
@@ -81,7 +82,13 @@ const fail = (ids, msg) => (ids.length ? patch(ids, { status: 'failed', error: S
 // 그림 줄 id(긴 uuid) 대신 v1, v2… 로 보내고(AI가 id를 잘못 옮겨 적어 설명이 버려지는 일 줄이기) 돌아오면 다시 맞춤.
 // 답의 id가 하나도 안 맞고 개수가 같으면 순서대로 맞춤.
 // 그림마다 관리화면에서 도면을 눌러 찍은 카메라 위치(input.cam)가 있으면 같이 보냄
-const vids = (rows) => rows.map((x, i) => { const c = RP.cleanInput(x.input); return { id: 'v' + (i + 1), view: x.view, cam: c.cam, mark: !!c.camMark }; });
+// 3D 밑그림(input.guide)을 받아 온 그림은 그 밑그림도 'guide v1' 처럼 이름 붙여 같이 보냄 (guides: 그림 줄 id → 그림)
+const vids = (rows, guides) => rows.map((x, i) => { const c = RP.cleanInput(x.input); return { id: 'v' + (i + 1), view: x.view, cam: c.cam, mark: !!c.camMark, guide: !!(guides && guides.get(x.id)) }; });
+const guideParts = (rows, guides, claude) => rows.flatMap((r, i) => {
+  const g = guides && guides.get(r.id); if (!g) return [];
+  return claude ? [{ type: 'text', text: 'guide v' + (i + 1) }, { type: 'image', source: { type: 'base64', media_type: g.mime, data: g.b64 } }]
+    : [{ text: 'guide v' + (i + 1) }, { inline_data: { mime_type: g.mime, data: g.b64 } }];
+});
 export function mapAgent(parsed, rows) {
   if (!parsed) return null;
   const byId = {};
@@ -97,7 +104,7 @@ function readAgent(text, rows, who) {
   else if (!Object.keys(out.byId).length) console.log('[render] 도면 읽기 답에 맞는 공간이 없음', who);
   return out;
 }
-export async function agent(plan, inp, rows, fetchImpl = fetch) {
+export async function agent(plan, inp, rows, fetchImpl = fetch, guides = null) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 120e3);
   try {
@@ -109,7 +116,8 @@ export async function agent(plan, inp, rows, fetchImpl = fetch) {
         messages: [{ role: 'user', content: [
           { type: 'text', text: '도면' },
           { type: 'image', source: { type: 'base64', media_type: plan.mime, data: plan.b64 } },
-          { type: 'text', text: RP.agentText(inp, vids(rows)) },
+          ...guideParts(rows, guides, true),
+          { type: 'text', text: RP.agentText(inp, vids(rows, guides)) },
         ] }],
       }),
     });
@@ -123,14 +131,15 @@ export async function agent(plan, inp, rows, fetchImpl = fetch) {
 }
 
 /* ---------- ① Gemini 글 모델로 도면 읽기 (Claude 키가 없을 때) ---------- */
-export async function agentGemini(plan, inp, rows, fetchImpl = fetch) {
+export async function agentGemini(plan, inp, rows, fetchImpl = fetch, guides = null) {
   try {
     const body = {
       system_instruction: { parts: [{ text: RP.SYSTEM }] },
       contents: [{ role: 'user', parts: [
         { text: '도면' },
         { inline_data: { mime_type: plan.mime, data: plan.b64 } },
-        { text: RP.agentText(inp, vids(rows)) },
+        ...guideParts(rows, guides, false),
+        { text: RP.agentText(inp, vids(rows, guides)) },
       ] }],
       // JSON 으로만 답하게 (따옴표 등으로 JSON 이 깨져 설명이 버려지는 일 막기)
       generationConfig: { maxOutputTokens: 16000, responseMimeType: 'application/json' },
@@ -170,9 +179,11 @@ export function pickImage(data) {
   const why = String((cand && cand.finishReason) || (data && data.promptFeedback && data.promptFeedback.blockReason) || '');
   return /SAFETY|BLOCK|PROHIBITED|RECITATION|IMAGE_OTHER/i.test(why) ? { blocked: true } : null;
 }
-export async function gemini(prompt, plan, fetchImpl = fetch, marked = false) {
+// guide 가 있으면 도면 대신 3D 밑그림을 보냄 (그 구도·벽·문·창 자리 그대로 마감만 입히게)
+export async function gemini(prompt, plan, fetchImpl = fetch, marked = false, guide = null) {
+  const pic = guide || plan;
   const body = {
-    contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt, marked) }, { inline_data: { mime_type: plan.mime, data: plan.b64 } }] }],
+    contents: [{ role: 'user', parts: [{ text: RP.imagePrompt(prompt, marked, !!guide) }, { inline_data: { mime_type: pic.mime, data: pic.b64 } }] }],
     generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '4:3', imageSize: G_SIZE } },
   };
   // store:false 를 같이 보냄 (AI Studio 기록에 남기지 않기 — 모르는 주소면 빼고 다시, netlify/lib/gemini.mjs)
@@ -227,7 +238,7 @@ async function run(req) {
   const pid = rows[0].project_id;
   // 한 번에 부른 그림은 같은 작업·같은 공사 내용이어야 함 (다르면 그 줄은 다시 만들게).
   // 카메라 위치와 도면 그림은 그림마다 달라도 됨 (카메라를 찍은 그림은 빨간 표시를 그린 도면을 따로 올림)
-  const key = (r) => { const c = RP.cleanInput(r.input); delete c.cam; delete c.camMark; return JSON.stringify([r.project_id, c]); };
+  const key = (r) => { const c = RP.cleanInput(r.input); delete c.cam; delete c.camMark; delete c.guide; return JSON.stringify([r.project_id, c]); };
   const mine = rows.filter((r) => key(r) === key(rows[0]));
   await fail(rows.filter((r) => !mine.includes(r)).map((r) => r.id), '다시 만들어 주세요.');
   if (!G_KEY) return fail(mine.map((r) => r.id), '그림 AI 키(GEMINI_API_KEY)가 아직 설정되지 않았어요. 앤에게 알려 주세요.');
@@ -262,22 +273,30 @@ async function draw(pid, claimed, cids) {
     const plan = await download(planPath);
     if (!plan) { await fail(gids, '도면 그림을 찾지 못했어요. 도면을 다시 올려 주세요.'); continue; }
     const inp = RP.cleanInput(rows[0].input);
+    // 3D 밑그림 받아 오기 (못 받으면 그 그림은 도면으로 — 예전 방식)
+    const guides = new Map();
+    for (const r of rows) {
+      const gp = RP.cleanInput(r.input).guide;
+      if (!gp || !gp.startsWith(`renders/${pid}/`)) continue;
+      const g = await download(gp);
+      if (g) guides.set(r.id, g); else console.log('[render] 3D 밑그림을 받지 못함 → 도면으로');
+    }
     // ① 도면 읽기 (Claude, Claude 키가 없으면 Gemini 글 모델 — 실패하면 정해 둔 설명으로)
-    let plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, rows) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, rows) : null;
-    if (!plan1 && PROVIDER === 'anthropic' && G_KEY) { console.log('[render] Claude 도면 읽기 실패 → Gemini로 다시'); plan1 = await agentGemini(plan, inp, rows); }
+    let plan1 = PROVIDER === 'anthropic' ? await agent(plan, inp, rows, fetch, guides) : PROVIDER === 'gemini' ? await agentGemini(plan, inp, rows, fetch, guides) : null;
+    if (!plan1 && PROVIDER === 'anthropic' && G_KEY) { console.log('[render] Claude 도면 읽기 실패 → Gemini로 다시'); plan1 = await agentGemini(plan, inp, rows, fetch, guides); }
     if (plan1 && !plan1.planOk) { await fail(gids, '올린 그림이 도면이 아닌 것 같아요. 도면 사진을 다시 올려 주세요.'); continue; }
-    rows.forEach((r) => jobs.push({ r, plan, a: plan1 && plan1.byId[r.id] }));
+    rows.forEach((r) => jobs.push({ r, plan, a: plan1 && plan1.byId[r.id], guide: guides.get(r.id) || null }));
   }
 
   // ② 두 장씩 동시에 그리기
   const work = async () => {
     for (let j = jobs.shift(); j; j = jobs.shift()) {
-      const { r, plan, a } = j;
+      const { r, plan, a, guide } = j;
       const v = RP.viewOf(r.view) || RP.VIEWS[0], ri = RP.cleanInput(r.input);
-      if (a && !a.found) { await fail([r.id], `도면에서 ‘${v.name}’을(를) 찾지 못했어요.`); continue; }
-      const prompt = (a && a.prompt) || RP.fallback(ri, r.view);
+      if (a && !a.found && !guide) { await fail([r.id], `도면에서 ‘${v.name}’을(를) 찾지 못했어요.`); continue; }   // 밑그림이 있으면 찍은 자리대로 그림
+      const prompt = (a && a.found && a.prompt) || RP.fallback(ri, r.view, !!guide);
       try {
-        const img = await gemini(prompt, plan, fetch, !!ri.camMark);
+        const img = await gemini(prompt, plan, fetch, !!ri.camMark, guide);
         const path = `renders/${pid}/${r.id}.${/png/.test(img.mime) ? 'png' : /webp/.test(img.mime) ? 'webp' : 'jpg'}`;
         await upload(path, img);
         await patch([r.id], { status: 'done', image_path: path, caption: (a && a.caption) || '', prompt: prompt.slice(0, 4000), error: '' });

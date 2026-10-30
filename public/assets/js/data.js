@@ -36,10 +36,11 @@
   // 3D 그림: 그림 줄들(+작업) → 저장소 파일(그림·도면) 경로 (겹치지 않게)
   function renderPaths(images, project) {
     var out = [], add = function (p) { if (p && out.indexOf(p) < 0) out.push(p); };
-    (images || []).forEach(function (r) { add(r && r.image_path); add(r && r.plan_path); });
+    (images || []).forEach(function (r) { add(r && r.image_path); add(r && r.plan_path); add(guideOf(r)); });   // guide: 3D 밑그림
     if (project) add(project.plan_path);
     return out;
   }
+  function guideOf(r) { var g = r && r.input && r.input.guide; return typeof g === 'string' && /(^|\/)renders\//.test(g) ? g : ''; }
   function renderPlanPath(pid) { return 'renders/' + pid + '/plan-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) + '.jpg'; }
   function renderErr(e) {
     var m = String((e && e.message) || e || '');
@@ -358,7 +359,7 @@
       return sb().then(function (c) {
         var get = keepFiles(o) ? Promise.resolve(null) : Promise.all([
           c.from('render_projects').select('plan_path').eq('id', id).maybeSingle().then(function (r) { return r && r.data; }, function () { return null; }),
-          c.from('render_images').select('image_path,plan_path').eq('project_id', id).then(function (r) { return (r && r.data) || []; }, function () { return []; }),
+          c.from('render_images').select('image_path,plan_path,input').eq('project_id', id).then(function (r) { return (r && r.data) || []; }, function () { return []; }),
         ]);
         return get.then(function (g) {
           return c.from('render_projects').delete().eq('id', id).then(check).then(function () {
@@ -398,6 +399,21 @@
         e.code = res.status === 404 ? 'no_function' : ''; throw e;
       });
     },
+    /** 도면에서 벽 따기 (서버 함수 /api/render-walls — AI가 벽·문·창 선을 돌려줌, 10~30초) → { walls, openings, dims } */
+    extractWalls: function (pid, path) {
+      return sb().then(function (c) { return c.auth.getSession(); }).then(function (r) {
+        var token = r.data.session && r.data.session.access_token;
+        if (!token) throw new Error('로그인이 풀렸어요. 다시 로그인한 뒤 눌러 주세요.');
+        return fetch(BASE + 'api/render-walls', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ pid: pid, path: path }) });
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (j) {
+          if (res.ok && j && j.ok) return j;
+          var e = new Error((j && j.error) || (res.status === 404 ? '벽 따기 기능이 아직 설치되지 않았어요. 앤에게 알려 주세요.'
+            : res.status === 429 ? '조금 전에 여러 번 눌렀어요. 1분 뒤에 다시 눌러 주세요.' : '벽을 따지 못했어요. 잠시 후 다시 눌러 주세요.'));
+          e.code = (j && j.code) || ''; throw e;
+        });
+      });
+    },
     updateRenderImage: function (id, patch) {
       var p = Object.assign({}, patch, { updated_at: new Date().toISOString() });
       return sb().then(function (c) { return c.from('render_images').update(p).eq('id', id).select().maybeSingle().then(check); });
@@ -405,7 +421,7 @@
     /** 그림 한 장 지우기 (휴지통 없이 바로). 그 그림의 도면은 지금 작업 도면이 아니고 다른 그림도 안 쓸 때만 같이 지움 */
     deleteRenderImage: function (id) {
       return sb().then(function (c) {
-        return c.from('render_images').select('project_id,image_path,plan_path').eq('id', id).maybeSingle().then(check).then(function (r) {
+        return c.from('render_images').select('project_id,image_path,plan_path,input').eq('id', id).maybeSingle().then(check).then(function (r) {
           if (!r) return null;
           return c.from('render_images').delete().eq('id', id).then(check).then(function () {
             var keep = !r.plan_path ? Promise.resolve(true) : Promise.all([
@@ -413,7 +429,7 @@
               c.from('render_projects').select('plan_path').eq('id', r.project_id).maybeSingle().then(function (x) { return !!(x && x.data && x.data.plan_path === r.plan_path); }, function () { return true; }),
             ]).then(function (a) { return a[0] || a[1]; });
             return keep.then(function (k) {
-              var paths = [r.image_path].concat(k ? [] : [r.plan_path]).filter(Boolean);
+              var paths = [r.image_path, guideOf(r)].concat(k ? [] : [r.plan_path]).filter(Boolean);   // 3D 밑그림은 그 그림만 씀
               return paths.length ? c.storage.from(PRIV).remove(paths).catch(function () {}) : null;
             });
           });
@@ -1067,6 +1083,17 @@
       return idbPut('blobs', path, blob).then(function () { return new Promise(function (r) { setTimeout(r, 250); }); }).then(function () { return path; });
     },
     removeRenderPlan: function (path) { return path ? Demo.removePhotos([path]) : Promise.resolve(); },
+    // 데모(미리보기): AI 대신 견본 벽(방 셋)을 돌려줌 — 고치기·밑그림 흐름만 보여 줌
+    extractWalls: function () {
+      var L = function (y1, x1, y2, x2) { return { a: [y1, x1], b: [y2, x2] }; };
+      return new Promise(function (r) { setTimeout(r, 900); }).then(function () {
+        return { ok: true, plan_ok: true, demo: true,
+          walls: [L(120, 80, 120, 920), L(880, 80, 880, 920), L(120, 80, 880, 80), L(120, 920, 880, 920), L(120, 560, 880, 560), L(520, 560, 520, 920)],
+          openings: [{ type: 'glass', a: [250, 80], b: [700, 80] }, { type: 'door', a: [600, 560], b: [700, 560] }, { type: 'door', a: [300, 560], b: [380, 560] },
+            { type: 'window', a: [120, 650], b: [120, 850] }, { type: 'window', a: [600, 920], b: [800, 920] }],
+          dims: [{ a: [80, 80], b: [80, 920], mm: 11000 }] };
+      });
+    },
     addRenderImages: function (rows) {
       return this.init().then(function () {
         var now = new Date().toISOString();   // 한 번에 넣은 줄은 같은 시각 (실서비스와 같게)
@@ -1113,7 +1140,7 @@
         delete mem.render_images[id];
         var p = mem.render_projects[r.project_id];
         var keepPlan = (p && p.plan_path === r.plan_path) || demoList('render_images').some(function (x) { return x.plan_path === r.plan_path; });
-        return Promise.all([saveRenders(), Demo.removePhotos([r.image_path].concat(keepPlan ? [] : [r.plan_path]).filter(Boolean))]);
+        return Promise.all([saveRenders(), Demo.removePhotos([r.image_path, guideOf(r)].concat(keepPlan ? [] : [r.plan_path]).filter(Boolean))]);
       });
     },
     setEstimateStatus: function (id, status) {
@@ -1433,10 +1460,10 @@
       var g = x.createLinearGradient(0, 0, 0, 768); g.addColorStop(0, '#F6F3EE'); g.addColorStop(1, '#E3DDD3');
       x.fillStyle = g; x.fillRect(0, 0, 1024, 768);
       var V = window.RenderPrompts, v = V && V.viewOf(r.view), font = '"Noto Sans KR", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
-      var finish = function (img) {
+      var finish = function (img, guide) {
         if (img) {
-          var s = Math.min(944 / img.naturalWidth, 688 / img.naturalHeight), w = img.naturalWidth * s, h = img.naturalHeight * s;
-          x.globalAlpha = 0.28; x.drawImage(img, (1024 - w) / 2, (768 - h) / 2, w, h); x.globalAlpha = 1;
+          var s = guide ? Math.max(1024 / img.naturalWidth, 768 / img.naturalHeight) : Math.min(944 / img.naturalWidth, 688 / img.naturalHeight), w = img.naturalWidth * s, h = img.naturalHeight * s;
+          x.globalAlpha = guide ? 0.8 : 0.28; x.drawImage(img, (1024 - w) / 2, (768 - h) / 2, w, h); x.globalAlpha = 1;
         }
         x.fillStyle = 'rgba(255,255,255,0.94)'; x.fillRect(212, 270, 600, 228);
         x.strokeStyle = '#C9C1B4'; x.lineWidth = 2; x.strokeRect(212, 270, 600, 228);
@@ -1447,10 +1474,10 @@
         x.fillText('실제 홈페이지에서는 AI가 3D 그림을 만들어요', 512, 450);
         c.toBlob(function (b) { resolve(b); }, 'image/jpeg', 0.86);
       };
-      var b = r.plan_path && mem.blobs[r.plan_path];
+      var gp = r.input && r.input.guide, b = (gp && mem.blobs[gp]) || (r.plan_path && mem.blobs[r.plan_path]);   // 3D 밑그림이 있으면 그것을 흐리게
       if (!b) return finish(null);
       var u = URL.createObjectURL(b), img = new Image();
-      img.onload = function () { finish(img); URL.revokeObjectURL(u); };
+      img.onload = function () { finish(img, b === (gp && mem.blobs[gp])); URL.revokeObjectURL(u); };
       img.onerror = function () { finish(null); URL.revokeObjectURL(u); };
       img.src = u;
     });
