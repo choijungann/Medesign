@@ -43,7 +43,7 @@
         }).join('') + '</div>' +
         (d.usersOk === false ? '<p class="hint">로그인 계정 정보를 불러오지 못해 명단만 보여요.</p>' : '') + '</section>' +
         '<section class="cust-sec"><h2>관리자 추가</h2><form class="txt-card adm-form" id="adm-form" novalidate>' +
-        '<div class="field"><label for="adm-email">이메일</label><input class="input" id="adm-email" type="text" inputmode="email" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" placeholder="예) name@naver.com"></div>' +
+        '<div class="field"><label for="adm-email">이메일</label><input class="input" id="adm-email" type="text"' + (K.inApp ? '' : ' inputmode="email"') + ' autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="120" placeholder="예) name@naver.com"></div>' +
         '<div class="field"><label for="adm-pw">처음 비밀번호 <span class="opt">(' + PW_MIN + '자 이상)</span></label>' +
         '<div class="pw-wrap"><input class="input" id="adm-pw" type="password" autocomplete="new-password" maxlength="72"><button type="button" id="adm-pw-toggle">보기</button></div>' +
         '<button type="button" class="btn btn-outline btn-sm adm-gen" data-gen>' + I.key + '비밀번호 만들어 주기</button>' +

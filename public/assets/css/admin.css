@@ -64,6 +64,10 @@ p { margin: 0; }
 .login .brand { width: 150px; margin-bottom: 36px; color: #363635; }
 .login .brand svg { display: block; width: 100%; height: auto; }
 .login h2 { font-size: 28px; margin-bottom: 32px; }
+.inapp-box { background: var(--warn-soft); border-radius: 12px; padding: 14px 16px; margin: -12px 0 24px; font-size: 16px; color: var(--ink-2); }
+.inapp-box b { color: var(--ink); }
+.inapp-box .btn { width: 100%; margin-top: 12px; }
+.inapp-box p + p { margin-top: 8px; }
 
 /* 입력 */
 .field { margin-bottom: 26px; }

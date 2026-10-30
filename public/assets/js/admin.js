@@ -502,6 +502,26 @@
     return viewHome();
   }
 
+  /* ---------- 앱 안 브라우저 (카톡·네이버 등) ----------
+     2026-10-29 제보: 카톡 안에서 이메일 칸에 한 글자 칠 때마다 키보드가 내려가고 화면이 오르내림.
+     앱 안에서는 이메일 전용 키보드(inputmode)를 쓰지 않고, 기본 브라우저로 여는 단추를 보여 줌. */
+  var UA = navigator.userAgent || '';
+  var INAPP = /KAKAOTALK/i.test(UA) ? 'kakao' : /NAVER\(inapp|NAVER\//.test(UA) ? 'naver' : /; wv\)|Instagram|FBAN|FBAV|Line\/|DaumApps|BAND\//.test(UA) ? 'app' : '';
+  function outsideLink() {
+    var url = location.origin + location.pathname + location.search;   // '#…' 은 빼고 (intent 주소와 겹침)
+    if (INAPP === 'kakao') return 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url);
+    if (/Android/i.test(UA)) return 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(url) + ';end';
+    return '';
+  }
+  function inAppBox() {
+    if (!INAPP) return '';
+    var name = INAPP === 'kakao' ? '카카오톡' : INAPP === 'naver' ? '네이버 앱' : '다른 앱';
+    var href = outsideLink();
+    return '<div class="inapp-box"><p><b>' + name + ' 안에서 열려 있어요.</b> 여기서는 글자 입력이나 로그인 유지가 잘 안 될 수 있어요.</p>' +
+      (href ? '<a class="btn btn-outline btn-sm" href="' + esc(href) + '">' + (INAPP === 'kakao' ? '기본 브라우저로 열기' : '크롬으로 열기') + '</a>'
+        : '<p>메뉴(⋯)에서 <b>다른 브라우저로 열기</b>를 눌러 주세요.</p>') + '</div>';
+  }
+
   /* ---------- 로그인 ---------- */
   function viewLogin(msg, keepEmail) {
     topbar.hidden = true;
@@ -510,10 +530,10 @@
     app.innerHTML = '<div class="login"><div class="login-card">' +
       '<div class="login-brand"><div class="brand">' + ((window.SITE_LOGO && window.SITE_LOGO.stacked) || I.lock) + '</div></div>' +
       '<div class="login-main">' +
-      '<h2>관리화면</h2>' +
+      '<h2>관리화면</h2>' + inAppBox() +
       (msg ? '<div class="error-msg">' + esc(msg) + '</div>' : '') +
       '<form id="login-form" novalidate>' +
-      '<div class="field"><label for="email">이메일</label><input class="input" id="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="' + esc(last) + '" required></div>' +
+      '<div class="field"><label for="email">이메일</label><input class="input" id="email" type="text"' + (INAPP ? '' : ' inputmode="email"') + ' autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="' + esc(last) + '" required></div>' +
       '<div class="field"><label for="pw">비밀번호</label><div class="pw-wrap"><input class="input" id="pw" type="password" autocomplete="current-password" required><button type="button" id="pw-toggle">보기</button></div></div>' +
       '<button class="btn btn-primary" type="submit">들어가기</button>' +
       (DB.live ? '' : '<p class="hint" style="text-align:center;margin-top:16px">데모 화면이라 아무 값이나 넣고 눌러도 들어가져요.</p>') +
@@ -2484,6 +2504,7 @@
   }
 
   var KIT = window.AdminKit = {
+    inApp: INAPP,
     PhotoPicker: PhotoPicker,
     C: C, DB: DB, I: I, esc: esc, $: $, $$: $$, fmtDate: fmtDate, store: store, ask: ask, toast: toast, notice: notice, listTools: listTools, leave: leave, prevHash: function () { return nav.idx > 0 ? nav.seq[nav.idx - 1] : null; }, replaceTo: replaceTo, setHash: setHash, goBack: goBack, focusNear: focusNear, keepPos: keepPos, flash: flash, copyFlash: copyFlash, progress: progress,
     frame: frame, go: go, setDirty: setDirty, state: state, friendlyError: friendlyError, titleEl: titleEl, routes: {},
