@@ -81,6 +81,8 @@ p { margin: 0; }
 .input-suffix { position: relative; }
 .input-suffix .input { padding-right: 56px; }
 .input-suffix span { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-weight: 600; color: var(--ink-2); }
+/* 평수 ↔ ㎡ 두 칸 (2026-10-30): 평수 칸 오른쪽에 ㎡ 칸 — 한쪽을 고치면 다른 쪽이 저절로 (admin.js) */
+.py-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pw-wrap { position: relative; }
 .pw-wrap .input { padding-right: 84px; }
 .pw-wrap button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 48px; padding: 0 14px; border: 0; background: #E3E8EC; border-radius: 10px; font-size: 16px; font-weight: 600; }
@@ -484,6 +486,9 @@ details.more .in { padding: 0 16px 6px; }
 .est-addcat .input { flex: 1; min-width: 0; min-height: 54px; }
 .est-addcat .btn { width: auto; flex: none; min-height: 54px; font-size: 17px; padding: 6px 14px; gap: 6px; }
 .est-addcat .btn svg { width: 20px; height: 20px; }
+.est-addcat:has(.py-pair) { flex-wrap: wrap; }
+.est-addcat .py-pair { flex: 100 1 280px; min-width: 0; }
+.est-addcat .py-pair ~ .btn { flex: 1 0 auto; }   /* 좁은 화면에서 아랫줄로 내려가면 꽉 차게 */
 .est-check { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 700; min-height: 48px; cursor: pointer; }
 .est-check input { width: 26px; height: 26px; accent-color: var(--primary); flex: none; }
 
@@ -2838,9 +2843,15 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-list-page .sec-head { margin-top: 22px; }   /* 견적서 목록과 같은 간격 */
 .rd-card .item-top { color: inherit; text-decoration: none; }
 .rd-card .item-title { -webkit-line-clamp: 2; }
-/* 휴대폰에서 글이 좁게 꺾이지 않게: 오른쪽 위 '지우기' 옆은 이름 줄만 비우고, 아래 줄(고객·그림 수)은 끝까지 씀 */
-.rd-card.has-del .item-txt { padding-right: 0; }
-.rd-card .item-title { padding-right: 84px; }
+/* 오른쪽 위 지우기 · 복사 (견적서·계약서 카드와 같은 너비로 위아래 — 2026-10-30 복사 더함): 글은 단추 왼쪽까지 */
+.rd-card.has-del .item-txt { padding-right: 96px; }   /* 높이는 작은 그림(72px)에 맞춤 — 단추 둘이 그 안에 들어감 */
+.rd-card .item-del, .rd-card .item-copy { width: 92px; justify-content: center; padding: 0 8px; }
+@media (max-width: 560px) {   /* 휴대폰: 글이 좁게 꺾이지 않게 지우기 · 복사는 카드 아래쪽 오른쪽에 나란히 */
+  .rd-card.has-del .item-txt { padding-right: 0; min-height: 0; padding-bottom: 46px; }
+  .rd-card .item-del, .rd-card .item-copy { top: auto; bottom: 10px; width: 88px; }
+  .rd-card .item-del { right: 10px; }
+  .rd-card .item-copy { right: 104px; }
+}
 .rd-list-page .fbar-grid:empty { display: none; }   /* 찾기 칸 하나만 — 아래 빈 줄 없이 */
 .rd-thumb { height: 72px; display: grid; place-items: center; color: #9AA3AD; }   /* 그림과 같은 4:3 */
 .rd-thumb svg { width: 30px; height: 30px; }
@@ -2896,16 +2907,54 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-cust .input { flex: 1; min-width: 0; min-height: 54px; }
 .rd-cust .est-x { width: 54px; height: 54px; }
 .rd-addc { margin: 0 0 20px; }
-.rd-size .est-suffix { max-width: 200px; }
+.rd-size .py-pair { max-width: 408px; }
 /* 도면 */
 .rd-plan-box { position: relative; margin: 0 0 12px; border: 2px solid var(--line); border-radius: 12px; background: #F6F7F8; overflow: hidden; }
 .rd-plan-scroll { overflow: hidden; touch-action: pan-x pan-y; }   /* 두 손가락 벌리기는 화면 전체가 아니라 도면만 키움 */
 .rd-plan-box.zoomed .rd-plan-scroll { overflow: auto; scrollbar-width: thin; }
-.rd-zoom { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; }
+.rd-zoom { display: flex; gap: 6px; margin-left: auto; }   /* 도면 제목 줄 오른쪽 (도면 상자 위 — 2026-10-30 전에는 도면 위에 겹쳐 있었음) */
 .rd-zoom button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 2px solid var(--line-2); border-radius: 10px; background: rgba(255, 255, 255, .94); color: var(--ink); cursor: pointer; }
 .rd-zoom button svg { width: 20px; height: 20px; }
 .rd-zoom button:disabled { opacity: .4; cursor: default; }
-.rd-plan-box img { display: block; width: 100%; max-height: 360px; object-fit: contain; cursor: zoom-in; }
+.rd-zoom .rd-zoom-v { width: auto; min-width: 58px; padding: 0 6px; font: inherit; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }   /* 배율 (누르면 100%) */
+.rd-zoom .rd-zoom-v:disabled { opacity: 1; color: var(--ink-3); }
+@media (max-width: 560px) { .rd-plan-hd { flex-wrap: wrap; row-gap: 8px; } .rd-zoom button { width: 36px; height: 36px; } .rd-zoom .rd-zoom-v { min-width: 54px; } }
+/* 도면 제목 + 바로 옆 '전체 화면' 단추 */
+.rd-plan-hd { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.rd-plan-hd .ct-label { margin: 0; }
+.rd-full-btn { flex: none; width: auto; min-height: 44px; gap: 6px; }
+.rd-full-btn svg { width: 19px; height: 19px; flex: none; }
+/* 전체 화면 · 원래 화면으로: 파란색으로 볼록하게 (위는 밝게, 아래 그림자) */
+.rd-plan-hd .rd-full-btn { padding: 6px 16px; border: 0; border-radius: 12px; background: linear-gradient(180deg, #567FB0 0%, #46699A 100%); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 0 #34557D, 0 2px 6px rgba(40, 70, 110, .16); transition: transform .08s, box-shadow .08s; }   /* 살짝만 볼록 (2026-10-30 줄임) */
+.rd-plan-hd .rd-full-btn:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 #34557D, 0 1px 3px rgba(40, 70, 110, .14); }
+.rd-plan-hd .rd-full-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+@media (hover: hover) { .rd-plan-hd .rd-full-btn:hover { background: linear-gradient(180deg, #5E88BA 0%, #4D71A3 100%); } }
+/* 도면 전체화면: 화면을 꽉 채움 (넓은 화면은 도면 왼쪽 + 고치는 칸 오른쪽, 좁은 화면은 도면 위에 붙고 칸은 아래로 밀어 봄) */
+.rd-plan.rd-full { position: fixed; inset: 0; z-index: 80; margin: 0; padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); border: 0; border-radius: 0; background: var(--surface); overflow-y: auto; overscroll-behavior: contain; }
+.rd-full > .rd-plan-add, .rd-full > .hint { display: none; }
+.rd-full > .rd-plan-hd { position: sticky; top: 0; z-index: 5; height: 66px; margin: 0; flex-wrap: nowrap; background: var(--surface); }
+.rd-full > .rd-plan-hd .ct-label { display: none; }   /* 전체화면: '도면' 글자는 빼고 원래 화면으로 · 배율만 (좁은 화면에서도 한 줄) */   /* 제목 + 큰 '원래 화면으로' (밀어도 늘 위에) */
+.rd-full .rd-plan-hd .rd-full-btn { min-height: 52px; padding: 8px 22px; border-radius: 12px; font-size: 18px; gap: 8px; }
+.rd-full > .rd-plan-hd .ct-label { font-size: 20px; }
+.rd-full .rd-plan-hd .rd-full-btn svg { width: 22px; height: 22px; }
+.rd-full > .rd-plan-box { position: sticky; top: 66px; z-index: 4; margin: 0 0 12px; box-shadow: 0 6px 16px rgba(30, 40, 55, .12); }
+body:has(.rd-plan.rd-full) { overflow: hidden; }   /* 뒤 화면은 안 움직이게 */
+@media (min-width: 900px), (orientation: landscape) and (min-width: 700px) {   /* admin-render.js FULL_SIDE와 같게 */
+  .rd-plan.rd-full { display: grid; grid-template-columns: minmax(0, 1fr) min(400px, 44vw); grid-template-rows: auto minmax(0, 1fr); align-items: start; gap: 4px 16px; padding: 8px 16px 16px; overflow: hidden; }
+  .rd-full > .rd-plan-hd { grid-column: 1; grid-row: 1; position: static; }   /* 제목 줄은 도면 위에만 → 배율 단추가 도면 오른쪽 끝에 맞음 */
+  .rd-full > .rd-plan-box { grid-column: 1; grid-row: 2; position: relative; top: auto; margin: 0; box-shadow: none; }
+  .rd-full > .rd-plan-rows { grid-column: 2; grid-row: 1 / span 2; align-self: stretch; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+  /* 옆 칸이 좁으니 휴대폰과 같은 배치 */
+  .rd-full .rd-cam-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .rd-full .rd-cam-chip { font-size: 15px; padding: 6px 4px; }
+  .rd-full .rd-cam-chip > span { display: inline-flex; flex-direction: column; align-items: center; }
+  .rd-full .rd-cam-chip .rd-badge { margin: 3px 0 0; }
+  .rd-full .rd-lens { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .rd-full .rd-lens .rd-cam-chip small { display: block; font-size: 14px; }
+  .rd-full .rd-ftabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rd-full .rd-wall-top { flex-wrap: wrap; }
+}
+.rd-plan-box img { display: block; width: 100%; height: auto; max-height: 360px; object-fit: contain; }   /* 눌러도 크게 보기 창은 안 뜸 (가구 놓기에 방해 — 크기는 ＋ −) */
 .rd-plan-box .hint { margin: 0; padding: 18px; text-align: center; }
 .rd-plan .hint { margin: 8px 0 16px; }
 /* 카메라 위치 (2026-10-30): 공간 단추 → 도면에서 서 있을 곳 → 바라볼 곳 */
@@ -2923,14 +2972,55 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-cam { margin: 0 0 14px; }
 .rd-cam-l { display: block; margin-bottom: 8px; font-size: 16px; font-weight: 700; color: var(--ink); }
 .rd-cam-l .opt { font-weight: 500; color: var(--ink-3); font-size: 15px; }
-.rd-cam-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.rd-cam-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 6px 14px; border: 2px solid var(--line-2); border-radius: 22px; background: var(--surface); font: inherit; font-size: 16px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.rd-sec-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; margin-bottom: 8px; }   /* 칸 제목 + 오른쪽 초기화 (단추가 있든 없든 높이 같게) */
+.rd-sec-hd .rd-cam-l { margin: 0; }
+.rd-sec-hd .rd-reset { min-height: 36px; margin-right: -6px; padding: 4px 8px; }
+.rd-sec-hd .rd-reset:disabled { color: var(--ink-3); opacity: .45; cursor: default; }   /* 지울 것이 없을 때도 자리는 그대로 (흐리게) */
+/* 카메라 위치: 고른 공간의 카메라 칸 — 흰 상자 안에 찍기·자동 단추 + 안내 한 줄 (공간 단추와 층이 다르게, 가구 칸의 흰 상자와 같은 모양 — 2026-10-30) */
+.rd-cam-panel { container-type: inline-size; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #fff; box-shadow: 0 0 0 1px #DCE3EC; }
+.rd-cam-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }   /* 왼쪽 카메라 자동(켜고 끄기) · 오른쪽 카메라 찍기 */
+/* 카메라 자동 / 직접 찍기 — 위아래 라디오 두 줄 (2026-10-30) */
+.rd-cam-modes { display: flex; flex-direction: column; gap: 4px; }
+.rd-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 2px 6px 2px 2px; border-radius: 10px; }
+.rd-mode-row.on { background: var(--accent-soft); }
+.rd-mode { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: 48px; padding: 4px 8px; border: 0; border-radius: 10px; background: none; font: inherit; text-align: left; color: var(--ink-2); cursor: pointer; }
+.rd-mode:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.rd-radio { position: relative; flex: none; width: 22px; height: 22px; border: 2px solid #A9B3BE; border-radius: 50%; background: #fff; }
+.rd-mode[aria-checked="true"] .rd-radio { border-color: var(--primary); }
+.rd-mode[aria-checked="true"] .rd-radio::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--primary); }
+.rd-mode-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.rd-mode-t b { font-size: 15.5px; color: var(--ink); }
+.rd-mode-t small { font-size: 13.5px; font-weight: 500; color: var(--ink-3); }
+.rd-mode-row .rd-wbtn { flex: none; min-height: 38px; padding: 4px 10px; background: var(--surface); }
+.rd-mode-row .rd-wbtn.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); color: var(--ink); }
+.rd-mode-row .rd-wbtn:disabled { opacity: .45; cursor: default; }
+.rd-mode-row [data-camgo] { min-width: 112px; justify-content: center; }   /* '그만'·'다시 찍기'로 바뀌어도 너비 그대로 */
+@media (max-width: 560px) { .rd-mode-row { flex-wrap: wrap; } .rd-mode { flex-basis: 100%; } .rd-mode-row [data-camgo] { margin: -4px 0 8px 40px; } }   /* 휴대폰: 다시 찍기 단추는 설명 아래 줄 (글이 좁게 꺾이지 않게) */
+.rd-cam-acts .rd-wbtn { justify-content: center; min-height: 40px; padding: 4px 10px; white-space: nowrap; background: var(--surface); }
+.rd-cam-acts .rd-wbtn.on { border-color: var(--primary); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--primary); color: var(--ink); }
+.rd-cam-msg { display: flex; align-items: center; min-height: 2.9em; margin: 0; padding: 0 10px; font-size: 14.5px; line-height: 1.45; color: var(--ink-3); word-break: keep-all; }   /* 두 줄 높이로 고정 (글이 바뀌어도 칸 높이 그대로) */
+.rd-badge { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 4.6em; text-align: center; margin-left: 2px; padding: 1.5px 7px 0.5px; border-radius: 999px; background: #E6ECF3; color: var(--ink-2); font-size: .8em; font-weight: 700; line-height: 1.45; vertical-align: .08em; white-space: nowrap; }   /* 종류 배지 ('욕실 1 [공용]') */
+.rd-cam-chip.on .rd-badge, .rd-guide-wait[aria-pressed="true"] .rd-badge { background: #D6E0EC; }
+.rd-cam-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); grid-auto-rows: 1fr; gap: 8px; }   /* 줄마다 높이 같게 (배지가 아래 줄로 간 칸이 있어도) */   /* 카메라·가구·종류 단추: 각진 칸으로 줄 맞춤 (2026-10-30) */
+@media (max-width: 560px) { .rd-cam-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } }
+.rd-cam-chip { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 46px; padding: 6px 8px; border: 2px solid var(--line-2); border-radius: 10px; background: var(--surface); font: inherit; font-size: 16px; font-weight: 700; line-height: 1.25; color: var(--ink-2); text-align: center; word-break: keep-all; overflow-wrap: anywhere; cursor: pointer; }
+@media (max-width: 560px) {
+  .rd-cam-chip { font-size: 15px; padding: 6px 4px; }
+  .rd-cam-chip > span { display: inline-flex; flex-direction: column; align-items: center; }   /* 휴대폰: 종류 배지·시야 각도는 늘 아래 줄에 (칸마다 같은 모양) */
+  .rd-cam-chip .rd-badge { margin: 3px 0 0; }
+  .rd-views .rd-kind { font-size: 12.5px; padding: 6px 4px; }
+  .rd-lens .rd-cam-chip small { display: block; }
+}
 .rd-cam-chip svg { width: 18px; height: 18px; color: var(--accent); }
-.rd-cam-chip.set { border-color: var(--accent); color: var(--ink); }
+.rd-cam-chip.set { border-color: #8EAED3; background: #DCE8F6; color: var(--ink); }   /* 위치를 찍은 공간: 옅은 파랑 색칠 (체크 표시 대신) */
 .rd-cam-chip.on { border-color: var(--primary); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--primary); color: var(--ink); }
+.rd-cam-chip.on.set { background: #DCE8F6; }
 .rd-cam-tip { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--accent-soft); font-size: 15.5px; color: var(--ink-2); }
 .rd-cam-tip b { color: var(--ink); }
 .rd-cam-clear { flex: none; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: 15px; font-weight: 700; color: var(--accent); cursor: pointer; }
+.rd-del { display: inline-flex; align-items: center; gap: 4px; color: var(--danger); }   /* 가구·방 칸 삭제 (붉은 글씨 + 휴지통) */
+.rd-del svg { width: 17px; height: 17px; flex: none; }
+@media (hover: hover) { .rd-del:hover { background: #FDF2F2; } }
 /* 3D 밑그림: 도면 위 벽 선 · 벽 따기/고치기 · 밑그림 미리보기 */
 .rd-wall-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .rd-wall-svg.dim { opacity: .55; }
@@ -2955,54 +3045,132 @@ a.ct-est-go:hover { background: #EAF1F9; }
 .rd-wall-ed { padding: 12px; border: 2px solid var(--accent); border-radius: 12px; background: var(--surface); }
 .rd-wall-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .rd-wall-top .rd-cam-l { margin: 0; }
-.rd-wall-top .btn-sm { width: auto; min-height: 44px; padding: 6px 18px; }
+/* 벽 고치기: 되돌리기 · 삭제 · 저장 — 보통은 제목 줄 오른쪽에 작게, 전체화면에서는 칸 맨 아래에 같은 너비 세 칸 (2026-10-30) */
+.rd-wall-ed { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 10px; }
+.rd-wall-ed > * { grid-column: 1 / -1; }
+.rd-wall-ed > .rd-wall-top { grid-column: 1; grid-row: 1; }
+.rd-wall-ed > .rd-wceil { justify-self: start; }
+.rd-wall-acts { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.rd-wall-acts > * { justify-content: center; white-space: nowrap; margin: 0; }
+.rd-wall-acts .rd-wbtn { min-height: 36px; padding: 4px 10px; gap: 4px; font-size: 14.5px; }
+.rd-wall-acts .rd-wbtn svg { width: 16px; height: 16px; }
+.rd-wall-acts .btn-sm { width: auto; min-height: 36px; padding: 4px 16px; font-size: 15px; border-radius: 10px; }
+@media (max-width: 560px) { .rd-wall-ed > .rd-wall-acts { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; } }   /* 휴대폰: 제목 아래 줄 오른쪽 */
 .rd-wall-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .rd-seg { display: inline-flex; border: 2px solid var(--line-2); border-radius: 12px; overflow: hidden; }
-.rd-wt { min-height: 42px; padding: 6px 16px; border: 0; background: var(--surface); font: inherit; font-size: 16px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.rd-wt { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 6px 16px; border: 0; background: var(--surface); font: inherit; font-size: 16px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
 .rd-wt + .rd-wt { border-left: 2px solid var(--line-2); }
 .rd-wt.on { background: var(--accent-soft); color: var(--ink); }
+.rd-wt svg { width: 19px; height: 19px; flex: none; }
 .rd-wbtn { display: inline-flex; align-items: center; gap: 5px; min-height: 42px; padding: 6px 12px; border: 2px solid var(--line-2); border-radius: 12px; background: var(--surface); font: inherit; font-size: 15.5px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
-.rd-wbtn svg { width: 18px; height: 18px; }
+.rd-wbtn svg { width: 18px; height: 18px; flex: none; }   /* 칸이 좁아도 그림이 줄어들지 않게 */
 .rd-wbtn:disabled { opacity: .45; cursor: default; }
-.rd-wall-tools .rd-wbtn { margin-left: auto; }
-.rd-wkinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.rd-wk { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 4px 12px; border: 2px solid var(--line-2); border-radius: 20px; background: var(--surface); font: inherit; font-size: 15.5px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
-.rd-wk.on { border-color: var(--primary); background: var(--accent-soft); color: var(--ink); }
+.rd-wk:disabled { opacity: .45; cursor: default; }   /* 벽 수정에서 고른 선이 없을 때 */
+.rd-wkinds { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; max-width: 460px; margin-bottom: 10px; }   /* 선 종류 다섯 개 한 줄 (2026-10-30) — 색 막대 위, 이름 아래 */
+.rd-wk { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 50px; padding: 6px 2px; border: 2px solid var(--line-2); border-radius: 10px; background: var(--surface); font: inherit; font-size: 14.5px; font-weight: 700; line-height: 1.2; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.rd-wk.on { border-color: var(--primary); background: var(--accent-soft); color: var(--ink); box-shadow: inset 0 0 0 1px var(--primary); }
 .rd-wk i, .rd-wsel-k i { flex: none; display: inline-block; width: 18px; height: 4px; border-radius: 2px; }
 i.k-w { background: #2563EB; } i.k-d { background: #16A34A; } i.k-n { background: #0891B2; } i.k-g { background: #9333EA; }
 i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 5px 8px); }
-.rd-wall-tip { margin: 0 0 10px; }
+.rd-wall-wrap { margin: 0 0 14px; container-type: inline-size; }
+.rd-wall-wrap > .rd-wall-ed { margin: 0; }
+.rd-wall-tip { display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: content-box; min-height: 2.9em; margin: 8px 0 0; padding: 9px 12px; border-radius: 10px; background: #EEF1F5; font-size: 14.5px; line-height: 1.45; color: var(--ink-2); word-break: keep-all; }   /* 벽 고치기 안내: 상자 밖 아래 옅은 상자 — 높이 고정(좁으면 두 줄 자리, 넓으면 한 줄), 글은 가운데 */
+.rd-wall-tip b { color: var(--ink-2); }
+.rd-wall-tip .rd-cam-clear { flex: none; min-height: 0; margin: 0 -4px 0 0; padding: 0 8px; font-size: 14.5px; line-height: 1.45; }   /* 그만: 글줄 높이와 같게 (안내 칸 높이가 안 바뀌게) */
+.rd-wsel.off > :not(.rd-wsel-acts) { opacity: .55; }   /* 고른 선이 없을 때 (자리는 그대로 · 그만 단추는 따로) */
+.rd-wsel-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }   /* 그만 · 삭제: 고른 선 줄 오른쪽 */
+.rd-wsel-acts .rd-wbtn { justify-content: center; min-height: 38px; padding: 4px 10px; gap: 4px; font-size: 14.5px; white-space: nowrap; }
+.rd-wsel-acts .rd-wbtn svg { width: 16px; height: 16px; }
+.rd-wsel-k i.k-none { visibility: hidden; }
 .rd-wsel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; padding: 8px 10px; border-radius: 12px; background: #F4F6F8; }
-.rd-wsel-k { display: inline-flex; align-items: center; gap: 6px; font-size: 15.5px; font-weight: 700; color: var(--ink); }
+.rd-wsel-k { display: inline-flex; align-items: center; gap: 6px; flex: none; width: 6.3em; font-size: 15.5px; font-weight: 700; color: var(--ink); white-space: nowrap; }   /* 너비 고정 — 종류 이름 길이와 상관없이 길이 칸이 늘 같은 자리 (2026-10-30) */
+.rd-wsel-p { font-weight: 500; color: var(--ink-3); }
 .rd-wnum { display: inline-flex; align-items: center; gap: 6px; font-size: 15.5px; font-weight: 700; color: var(--ink-2); }
 .rd-wnum .input { width: 84px; min-height: 42px; padding: 6px 10px; text-align: right; font-size: 16px; }
-.rd-wdel { margin-left: auto; color: var(--danger); }
+.rd-m { min-width: 4.6em; font-size: 14px; font-weight: 600; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }   /* mm 옆 미터 (글자만 · 자리 고정) */
+.rd-wdel { color: var(--danger); }
 .rd-wnote { margin: 0 0 8px; font-size: 14.5px; color: var(--ink-3); }
 .rd-guides { margin: 0 0 14px; }
+/* 도면 아래 기능 칸 구분 (2026-10-30): 카메라 · 가구 · 3D 밑그림 · 미리보기를 옅은 색 상자로 나눔 */
+.rd-plan-rows > .rd-cam, .rd-plan-rows > .rd-wall:not(.rd-wall-ed), .rd-plan-rows > .rd-guides, .rd-plan-rows > .rd-guide-none { margin: 0 0 12px; padding: 14px; border: 1px solid; border-radius: 14px; }
+.rd-plan-rows > .rd-cam:not(.rd-furn) { background: #F2F6FB; border-color: #DFE7F1; }   /* 카메라 — 옅은 파랑 */
+.rd-plan-rows > .rd-furn { background: #FBF6EF; border-color: #F0E4D3; }                 /* 가구·구조 — 옅은 살구 (도면의 주황 가구와 같은 계열) */
+.rd-plan-rows > .rd-wall:not(.rd-wall-ed) { background: #F2F7F3; border-color: #DCEADF; }  /* 3D 밑그림 — 옅은 초록 */
+.rd-plan-rows > .rd-guides, .rd-plan-rows > .rd-guide-none { background: #F6F6F8; border-color: #E5E7EB; }   /* 밑그림 미리보기 — 옅은 회색 */
+.rd-plan-rows > .rd-cam .rd-cam-tip { background: #fff; box-shadow: 0 0 0 1px #DCE3EC; }   /* 상자 안의 안내·고치기 칸은 흰 바탕 */
+.rd-plan-rows > .rd-furn .rd-furn-tip { background: #fff; box-shadow: 0 0 0 1px #EADBC6; }
 .rd-guide-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .rd-guide { display: flex; flex-direction: column; gap: 4px; padding: 0; border: 2px solid var(--line); border-radius: 10px; background: #F6F7F8; overflow: hidden; font: inherit; font-size: 14.5px; font-weight: 700; color: var(--ink-2); text-align: left; cursor: zoom-in; }
 .rd-guide img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
-.rd-guide span { padding: 0 8px 6px; }
+.rd-guide > span:not(.rd-guide-ph) { padding: 0 8px 6px; }   /* 칸 이름 줄만 (배지·빈 칸 안내에는 안 붙게 — 붙으면 글자가 위로 쏠렸음) */
 .rd-guide-none { margin: 0 0 14px; font-size: 15px; color: var(--ink-3); }
+.rd-sec-empty { margin: 0; padding: 14px 12px; border: 1.5px dashed var(--line-2); border-radius: 10px; background: rgba(255, 255, 255, .6); font-size: 14.5px; line-height: 1.45; color: var(--ink-3); text-align: center; word-break: keep-all; }   /* 칸 안 안내 (아직 보여 줄 것이 없을 때 — 칸은 그대로) */
+.rd-lens { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); align-items: center; gap: 8px; margin-top: 12px; }   /* 카메라 시야 — 위 카메라 위치 단추와 같은 칸 나눔(같은 줄에 세로로 맞음), '시야'는 위 줄 (2026-10-30) */
+.rd-lens-l { grid-column: 1 / -1; font-size: 14.5px; font-weight: 700; color: var(--ink-3); }
+@media (max-width: 560px) { .rd-lens { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .rd-lens .rd-cam-chip small { font-size: 14px; } }   /* 휴대폰: '시야'는 위에, 단추 셋은 한 줄에 */
+.rd-lens .rd-cam-chip small { font-size: 15px; font-weight: 700; color: var(--ink-3); }   /* 각도 (2026-10-30 키움 — 13px은 작았음) */
+.rd-cam-fov { fill: var(--ink-2); fill-opacity: .07; stroke: var(--ink-2); stroke-opacity: .35; stroke-dasharray: 4 3; }   /* 도면 위 카메라 시야 부채꼴 */
+.rd-cam-mk.on .rd-cam-fov { fill: var(--accent); fill-opacity: .14; stroke: var(--accent); stroke-opacity: .6; }
+.rd-guide-wait { border-style: dashed; cursor: pointer; }   /* 바라볼 쪽을 아직 안 찍은 공간 (바탕은 다른 칸과 같게) */
+.rd-guide-wait .rd-guide-ph { display: grid; place-items: center; aspect-ratio: 4 / 3; padding: 8px; background: #E8EDF3; font-size: 14px; font-weight: 600; color: var(--ink-3); text-align: center; line-height: 1.4; }   /* 그림 자리: 옅은 파랑 회색 — 아래 이름 줄과 구분 */
+.rd-guide-wait[aria-pressed="true"] { border-color: var(--accent); }
 /* 가구 위치 */
-.rd-furn-tip { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; position: sticky; bottom: 8px; z-index: 3; box-shadow: 0 0 0 1px #D5DEE9, 0 4px 14px rgba(30, 50, 80, .10); }   /* 고른 가구 칸: 아래로 내려가 있어도 화면 아래에 붙어 보임 */
-.rd-furn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.rd-furn-row .rd-wbtn { min-height: 40px; padding: 4px 10px; background: var(--surface); }
-.rd-furn-row .rd-wnum .input { width: 64px; min-height: 40px; padding: 4px 8px; }
-.rd-furn-row .rd-wnum .input::placeholder { color: var(--ink-3); }
+.rd-furn-tip { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; box-shadow: 0 0 0 1px #D5DEE9; }
+.rd-furn-tip.rd-furn-adding { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }   /* 놓는 중: 안내 · 취소 (오른쪽) */
+.rd-furn-adding .rd-wbtn { flex: none; justify-content: center; min-height: 38px; padding: 4px 10px; gap: 4px; font-size: 14.5px; white-space: nowrap; }
+.rd-furn-adding .rd-wbtn svg { width: 16px; height: 16px; }   /* 고른 가구 칸: 제자리에 (스크롤할 때 떠다니지 않게 — 2026-10-30) */
+/* 고른 가구 칸: 돌리기 한 줄 · 크기 한 줄을 같은 세 칸에 맞춤 (2026-10-30) */
+.rd-furn-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 8px; max-width: 440px; }   /* 이름이 두 줄이 돼도 칸은 아래 줄에 맞춤 */
+.rd-furn-grid .rd-wbtn { justify-content: center; width: 100%; min-height: 42px; padding: 4px 8px; background: var(--surface); }
+.rd-furn-grid .rd-span2 { grid-column: span 2; }
+.rd-furn-rot { grid-template-columns: repeat(4, minmax(0, 1fr)); }   /* 돌리기 네 칸: ↺90° ↻90° ↺45° ↻45° */
+@media (max-width: 560px) { .rd-furn-rot { gap: 6px; } .rd-furn-rot .rd-wbtn { gap: 3px; padding: 4px 2px; } .rd-furn-rot .rd-wbtn svg { width: 16px; height: 16px; } }
+.rd-furn-size .rd-wnum { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'l' 'i' 'm'; align-items: center; gap: 3px; }   /* 이름(mm) · 칸 · (미터) 차례로 */   /* 이름(mm)은 위, 칸은 아래 — 칸이 돌리기 단추 줄과 좌우 끝이 같게 (2026-10-30) */
+.rd-furn-size .rd-wnum-l { grid-area: l; font-size: 14px; color: var(--ink-3); }
+.rd-furn-size .rd-wnum .input { grid-area: i; width: 100%; min-width: 0; min-height: 42px; padding: 4px 10px; }
+.rd-furn-size .rd-wnum-l small { font-size: 12.5px; font-weight: 600; }
+.rd-furn-size .rd-m { grid-area: m; min-width: 0; min-height: 1.3em; padding-right: 12px; font-size: 13px; line-height: 1.3; text-align: right; }   /* 칸 아래 오른쪽 (숫자 바로 밑) — 비어도 자리 그대로 */   /* (mm) */
+.rd-furn-size .rd-wnum .input::placeholder { color: var(--ink-3); }
+.rd-furn-name { font-size: 16.5px; color: var(--ink); }
+.rd-furn-hint { margin: 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-3); }   /* 맨 아래 작은 안내 */
+.rd-furn-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }   /* 안내 · 자석 (오른쪽) */
+.rd-mag { flex: none; position: relative; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.rd-mag input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.rd-mag .switch { width: 42px; height: 24px; }
+.rd-mag .switch::after { left: 3px; top: 3px; width: 18px; height: 18px; }
+.rd-mag input:checked ~ .switch { background: var(--ok); }
+.rd-mag input:checked ~ .switch::after { transform: translateX(18px); }
+.rd-mag input:focus-visible ~ .switch { outline: 3px solid var(--focus, #2F6FEB); outline-offset: 2px; }
+.rd-mag.off { opacity: .45; cursor: default; }   /* 가벽·벽 마감·샹들리에: 해당 없음 (자리는 그대로) */
 .rd-furn-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .rd-furn-x { flex: none; }
 .rd-ftabs { margin: 0 0 10px; }   /* 가구 분류 탭 (견적 품목 고르기 창의 탭과 같은 모양) */
 .rd-ftabs .fd-tab { min-height: 42px; padding: 4px 2px; font-size: 15.5px; }
 .rd-ftabs .fd-tab small { font-size: 13px; }
-.rd-furn-chips { margin-bottom: 4px; }
-@media (max-width: 560px) {   /* 휴대폰: 분류 탭 3칸 × 2줄 */
-  .rd-ftabs { display: grid; grid-template-columns: repeat(3, 1fr); }
-  .rd-ftabs .fd-tab:nth-child(3n + 1) { border-left: 0; }
-  .rd-ftabs .fd-tab:nth-child(n + 4) { border-top: 1.5px solid var(--line-2); }
-}
+.rd-furn-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }   /* 가구 단추: 위 분류 탭(네모 칸)과 다르게 둥근 타원 · 작게 · 글자 길이만큼 (2026-10-30) */
+.rd-furn-chips .rd-cam-chip { min-width: 84px; min-height: 38px; padding: 4px 16px; border-width: 1.5px; border-radius: 999px; font-size: 15px; }
+.rd-furn-chips .rd-cam-chip svg { width: 16px; height: 16px; }
+.rd-furn-chips .rd-cam-chip.set { background: #F8DDBA; border-color: #E2AD6E; color: #5A3410; }   /* 놓은 가구: 도면의 주황 가구와 같은 계열 색 (체크 표시 대신) */
+.rd-furn-chips .rd-cam-chip.on { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.rd-furn-chips .rd-cam-chip.on:not(.set) { background: var(--accent-soft); }
+/* 가구 칸은 한 색 계열로 (분류 탭의 진한 파랑과 놓은 가구의 주황이 섞여 어지러웠음 — 2026-10-30): 탭·단추 모두 따뜻한 갈색·살구 */
+.rd-furn .rd-ftabs { border-color: #E2CBAE; background: #E2CBAE; }   /* 칸 사이 줄도 같은 색 */
+.rd-furn .rd-ftabs .fd-tab { color: #5C4330; }
+.rd-furn .rd-ftabs .fd-tab small { color: #A27B55; }
+.rd-furn .rd-ftabs .fd-tab.on { background: #8C5A2E; color: #fff; }
+.rd-furn .rd-ftabs .fd-tab.on small { color: rgba(255, 255, 255, .82); }
+.rd-furn-chips .rd-cam-chip:not(.set) { border-color: #E2CBAE; color: #5C4330; }
+.rd-furn-chips .rd-cam-chip.set { background: #F8E1C4; border-color: #DDAE77; color: #5A3410; }
+.rd-furn-chips .rd-cam-chip.on { border-color: #8C5A2E; box-shadow: inset 0 0 0 1px #8C5A2E; }
+.rd-furn-chips .rd-cam-chip.on:not(.set) { background: #FCEEDD; }
+.rd-fn { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 2px; padding: 0 5px; border-radius: 10px; background: #B45309; color: #fff; font-size: 12.5px; font-weight: 700; line-height: 1; }   /* 놓은 개수 (두 개 이상) */
+/* 분류 탭: 칸 사이 줄은 틈(1.5px)으로 그려 모든 칸의 너비·높이가 똑같게 (테두리를 칸에 붙이면 둘째 줄이 줄 두께만큼 낮아 보였음 — 2026-10-30) */
+.rd-ftabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 1.5px; background: var(--line-2); }
+.rd-ftabs .fd-tab, .rd-ftabs .fd-tab + .fd-tab { border: 0; background: var(--surface); }
+.rd-ftabs .fd-tab.on { background: var(--primary); }
+@media (max-width: 560px) { .rd-ftabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }   /* 휴대폰: 3칸 × 2줄 */
 .rd-fu polygon { fill: rgba(217, 119, 6, .16); stroke: #B45309; }
-.rd-fu-front { stroke: #B45309; stroke-linecap: round; }
+.rd-fu-front { stroke: #B45309; stroke-linecap: butt; }
 .rd-fu-arr { stroke: #B45309; stroke-linecap: round; }
 .rd-fah path { fill: #B45309; }
 .rd-fu text { fill: #7C2D12; stroke: #fff; paint-order: stroke; font-weight: 700; text-anchor: middle; font-family: var(--font); }
@@ -3037,7 +3205,30 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-mph-add { position: relative; }
 .rd-mph-wait { font-size: 14px; color: var(--ink-3); cursor: default; }
 .rd-in-guide { display: block; width: 160px; max-width: 100%; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
-.est-cboxes.rd-views { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }   /* 9칸 3×3 (PC도 3칸) */
+.est-cboxes.rd-views { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; }   /* 3칸씩 (고정 6칸 + 방 — 기본 9칸) */
+.rd-views .est-cbox.sel { box-shadow: 0 0 0 3px #B9C6D6; }   /* 용도를 고르는 중인 방 */
+.rd-views .est-cbox, .rd-views .rd-room-add { min-height: 72px; }   /* 칸 높이를 늘 같게 (종류 단추가 있는 칸 기준 — 방을 지우거나 삭제 중이어도 그대로) */
+.rd-views .rd-kind { display: block; box-sizing: border-box; width: 112px; max-width: 100%; margin: 4px auto -2px; padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 8px; background: rgba(26, 25, 23, .06); font-size: 13.5px; font-weight: 700; line-height: 1.2; cursor: pointer; }   /* 칸 안의 종류 단추 ('서재 ▾') — 누르면 종류 고르기 */
+.rd-views .est-cbox.on .rd-kind { background: rgba(255, 255, 255, .16); }
+.rd-views .est-cbox.sel .rd-kind { background: rgba(255, 255, 255, .3); }
+.rd-views .est-cbox:not(.on).sel .rd-kind { background: #DCE3EC; }
+@media (hover: hover) { .rd-views .rd-kind:hover { background: rgba(26, 25, 23, .12); } .rd-views .est-cbox.on .rd-kind:hover { background: rgba(255, 255, 255, .28); } }
+.rd-views .rd-kind:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.rd-pick-hd { display: flex; align-items: center; justify-content: space-between; gap: 10px; }   /* 만들 그림 제목 + 삭제(완료) */
+.rd-pick-hd .ct-label { margin-bottom: 0; }
+.rd-pick-hd .rd-del.on { padding: 4px 16px; color: #fff; background: var(--primary); }   /* 저장 (삭제 끝내기) */
+@media (hover: hover) { .rd-pick-hd .rd-del.on:hover { background: var(--primary); opacity: .9; } }
+.rd-pick-hd + .rd-views { margin-top: 8px; }
+.rd-views.del-mode .est-cbox { cursor: default; }
+.rd-views.del-mode .rd-kind { pointer-events: none; opacity: .5; }
+.rd-tile-x { position: absolute; top: -8px; right: -8px; z-index: 2; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--danger); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); cursor: pointer; }   /* 삭제하는 동안 칸마다 X */
+.rd-tile-x svg { width: 16px; height: 16px; }
+.rd-tile-x:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.rd-room-add { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; padding: 6px 8px; border: 2px dashed var(--line-2); border-radius: 12px; background: none; color: var(--ink-2); font: inherit; font-size: 15.5px; font-weight: 700; cursor: pointer; }   /* 방 추가 (점선 칸) */
+.rd-room-add svg { width: 18px; height: 18px; flex: none; }
+@media (hover: hover) { .rd-room-add:hover { border-color: #A6ADB5; color: var(--ink); } }
+.rd-room-add.on { border-color: var(--primary); border-style: solid; color: var(--ink); background: #F7F8FA; }   /* 방 추가를 누른 채 — 아래에서 침실·욕실·발코니 고르기 */
+.rd-room-tip { position: static; margin: 0 0 14px; box-shadow: none; }   /* 고른 방: 용도 고르기 · 빼기 (가구 칸처럼 화면 아래에 붙지 않음) */
 .rd-page .textarea { min-height: 0; }
 .rd-go { min-height: 58px; font-size: 19px; margin: 0 0 8px; }
 .rd-go:disabled, .rd-redo:disabled { opacity: .5; cursor: default; }
@@ -3074,3 +3265,29 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-acts .btn-sm svg { width: 20px; height: 20px; }
 .rd-acts .est-x { width: 48px; height: 48px; }
 .rd-acts .est-x:disabled { opacity: .35; cursor: default; }
+@media (max-width: 380px) { .rd-plan-hd { gap: 8px; } .rd-zoom { gap: 4px; } .rd-zoom button { width: 34px; height: 34px; } .rd-zoom .rd-zoom-v { min-width: 50px; padding: 0 4px; } .rd-plan-hd .rd-full-btn { padding: 6px 12px; } }   /* 작은 휴대폰(360px)도 도면 제목 줄이 한 줄 (파일 끝 — 위의 단추 규칙보다 나중에) */
+/* 전체화면: 벽 고치기 단추 셋은 칸 맨 아래에 같은 너비로 (위에 가는 줄) — 파일 끝 (위 규칙보다 나중에) */
+.rd-full .rd-wall-ed > .rd-wall-acts { grid-column: 1 / -1; grid-row: auto; order: 99; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.rd-full .rd-wall-acts > * { width: 100%; padding-left: 4px; padding-right: 4px; }
+.rd-full .rd-wall-acts .rd-wbtn, .rd-full .rd-wall-acts .btn-sm { min-height: 44px; font-size: 15.5px; }
+/* 안내 칸: 넓으면 어떤 안내도 한 줄에 들어가서 한 줄 높이로 고정 — 파일 끝 (위의 두 줄 높이 규칙보다 나중에 와야 적용됨) */
+@container (min-width: 470px) { .rd-cam-msg { min-height: 1.45em; } }
+@container (min-width: 500px) { .rd-wall-tip { min-height: 1.45em; } }
+@container (max-width: 579px) { .rd-wsel-acts { order: 1; } .rd-wsel > .rd-wnum { order: 2; flex-basis: 100%; } }   /* 좁을 때: 고른 선 · 그만/삭제 한 줄, 길이는 아랫줄 */
+/* 설정 → 3D 그림 가구 크기 (2026-10-30): 가구마다 처음 놓을 때의 가로·깊이·높이 (mm) — 비우면 흐린 기본 크기 */
+.fs-card h2 { margin: 0 0 4px; font-size: 19px; }
+.fs-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); align-items: end; gap: 6px 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.fs-card h2 + .fs-row { border-top: 0; padding-top: 6px; }
+.fs-name { align-self: center; padding-top: 22px; font-size: 16.5px; color: var(--ink); }
+.fs-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }   /* 칸이 두 개인 가구도 같은 자리 */
+.fs-num { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 14px; font-weight: 700; color: var(--ink-3); }
+.fs-num small { font-size: 12.5px; font-weight: 600; }
+.fs-num .input { min-height: 44px; padding: 4px 10px; text-align: right; font-size: 16px; }
+.fs-num .input::placeholder { color: var(--ink-3); opacity: .7; }
+@media (max-width: 560px) { .fs-row { grid-template-columns: minmax(0, 1fr); } .fs-name { padding-top: 0; } }   /* 휴대폰: 이름은 위, 칸은 아래 */
+/* 카메라 위치 공간 칸 (2026-10-30): 이름 · 종류 배지는 늘 좌우 한 줄 (전에는 좁으면 배지가 아래 줄로 내려가 칸마다 모양이 달랐음) — 휴대폰·전체화면은 두 칸씩 */
+.rd-camsel-chips { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.rd-camsel-chips .rd-cam-chip > span { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.rd-camsel-chips .rd-cam-chip .rd-badge { flex: 0 1 auto; margin: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) { .rd-camsel-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rd-full .rd-camsel-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -479,6 +479,8 @@ textarea.q-input { height: auto; padding: 14px 16px; line-height: 1.6; resize: v
 .q-suffix { position: relative; }
 .q-suffix .q-input { padding-right: 44px; }
 .q-suffix span { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); color: var(--ink-2); }
+/* 평수 ↔ ㎡ 두 칸 (2026-10-30) — 한쪽을 적으면 다른 쪽이 저절로 (site.js) */
+.py-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .q-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .q-chip { position: relative; }
 .q-chip input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }

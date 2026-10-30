@@ -823,3 +823,17 @@
   }, function () {}).then(function () { clearTimeout(txtTimer); ROOT.classList.remove('txt-pending'); });
   reveal();
 })();
+
+/* 평수 ↔ ㎡ (상담 신청 — 2026-10-30): 한쪽을 적으면 다른 쪽이 저절로 (1평 = 400/121㎡). ㎡ 칸은 이름이 없어 보내지 않음 — 평수만 보냄 */
+(function () {
+  var K2 = 400 / 121;
+  function n1(v) { var m = /(\d+(?:\.\d+)?)/.exec(String(v || '').replace(/,/g, '')); return m ? parseFloat(m[1]) : NaN; }
+  function r1(n) { return isFinite(n) && n > 0 ? String(Math.round(n * 10) / 10) : ''; }
+  document.addEventListener('input', function (e) {
+    var el = e.target, pair = el && el.closest && el.closest('.py-pair'); if (!pair) return;
+    var py = pair.querySelector('[data-py]'), m2 = pair.querySelector('[data-m2]'); if (!py || !m2) return;
+    if (el === py) m2.value = r1(n1(py.value) * K2);
+    else if (el === m2) py.value = r1(n1(m2.value) / K2);
+  });
+})();
+

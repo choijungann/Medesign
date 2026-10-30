@@ -18,18 +18,87 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  // 만들 수 있는 그림 (화면의 3×3 타일 순서)
+  // 만들 수 있는 그림 — 고정 칸 (화면 순서). 방은 작업마다 용도를 골라 늘리고 줄임 (ROOM_USES, 2026-10-30)
   var VIEWS = [
     { key: 'overview', name: '전체 조감도', en: 'the whole home as a 3D isometric cutaway (bird\'s-eye view)' },
     { key: 'living', name: '거실', en: 'the living room' },
     { key: 'kitchen', name: '주방', en: 'the kitchen and dining area' },
-    { key: 'master', name: '안방', en: 'the master bedroom' },
-    { key: 'room', name: '작은방', en: 'a smaller bedroom (kids room or study)' },
-    { key: 'bath', name: '욕실', en: 'the bathroom' },
+    { key: 'powder', name: '파우더룸', en: 'the powder room (a vanity area with a dressing table, a large mirror and soft lighting, often next to the main bedroom\'s dressing room or bathroom)' },
     { key: 'entry', name: '현관', en: 'the entrance foyer' },
-    { key: 'dress', name: '드레스룸', en: 'the dressing room (walk-in closet)' },
-    { key: 'balcony', name: '발코니', en: 'the balcony (veranda)' },
+    { key: 'hall', name: '복도', en: 'the hallway (the corridor that connects the rooms)' },
   ];
+  // 예전 칸 (2026-10-30 전에 만든 그림의 이름·다시 만들기용 — 화면에는 안 나옴)
+  var OLD_VIEWS = [
+    { key: 'master', name: '안방', en: 'the master bedroom', old: true },
+    { key: 'room', name: '작은방', en: 'a smaller bedroom (kids room or study)', old: true },
+    { key: 'bath', name: '욕실', en: 'the bathroom', old: true },
+    { key: 'balcony', name: '발코니', en: 'the balcony (veranda)', old: true },
+  ];
+  // 여러 개 둘 수 있는 공간 (2026-10-30): 침실 · 욕실 · 발코니 — 칸마다 종류(용도)를 고름
+  // 열쇠 '종류#번호' ('bed#1', 'study#2', 'mbath#2', 'ubal#2' …, 번호 = 그 공간 몇 번째) → 이름 '침실 2 · 서재', '욕실 2 · 안방', '발코니 2 · 주방 쪽'
+  // (잠깐 쓴 번호 없는 열쇠 'bed'·'study' 등은 예전 그림 이름용으로만 읽음)
+  var ROOM_CATS = [
+    { key: 'bed', base: '침실', max: 6, plain: 'bed', ask: '어떤 방으로 쓰나요?', add: '침실 추가' },
+    { key: 'bath', base: '욕실', max: 3, ask: '어떤 욕실인가요?', add: '욕실 추가' },
+    { key: 'balc', base: '발코니', max: 3, ask: '어디 발코니인가요?', add: '발코니 추가' },
+  ];
+  var ROOM_USES = [
+    { key: 'bed', cat: 'bed', name: '침실', en: 'a bedroom' },
+    { key: 'mbed', cat: 'bed', name: '안방', en: 'the main bedroom (안방 - the room labelled 안방 or master bedroom, otherwise the largest bedroom, usually the one with its own bathroom or dressing room; a bed, bedside tables and storage)' },
+    { key: 'kids', cat: 'bed', name: '아이방', en: 'a child\'s bedroom (furnished for a child: a child\'s bed, a small desk and toy or book storage)' },
+    { key: 'study', cat: 'bed', name: '서재', en: 'a study / home office (furnished with a desk, a chair and bookshelves)' },
+    { key: 'guest', cat: 'bed', name: '손님방', en: 'a guest bedroom' },
+    { key: 'dress', cat: 'bed', name: '드레스룸', en: 'a dressing room (walk-in closet, furnished with clothes storage)' },
+    { key: 'pbath', cat: 'bath', name: '공용 욕실', short: '공용', chip: '공용', en: 'the shared bathroom off the hallway (often labelled 욕실1 or 공용 욕실)' },
+    { key: 'lbal', cat: 'balc', name: '거실 발코니', short: '거실 쪽', chip: '거실 쪽', en: 'the balcony off the living room (usually the large front balcony)' },
+    { key: 'ubal', cat: 'balc', name: '주방 발코니', short: '주방 쪽', chip: '주방 쪽', en: 'the utility balcony off the kitchen (다용도실 - laundry and storage)' },
+    // 잠깐 쓴 종류 (예전 그림 이름용 — 고르기에는 안 나옴, 작업을 열면 침실 1 욕실·침실 1 쪽 발코니로 바뀜)
+    { key: 'mbath', cat: 'bath', name: '안방 욕실', short: '안방', old: true, en: 'the main bedroom\'s own bathroom (en-suite)' },
+    { key: 'bbal', cat: 'balc', name: '침실 발코니', short: '침실 쪽', old: true, en: 'a balcony off a bedroom' },
+  ];
+  /** 종류 열쇠 → 정보. 'en2' = 침실 2에 딸린 욕실, 'bal2' = 침실 2 쪽 발코니 (침실 번호를 따라감) */
+  function useOf(k) {
+    var u = ROOM_USES.filter(function (x) { return x.key === k; })[0]; if (u) return u;
+    var m = /^(en|bal)([1-6])$/.exec(String(k || '')); if (!m) return null;
+    var n = +m[2];
+    return m[1] === 'en' ? { key: k, cat: 'bath', bed: n, name: '침실 ' + n + ' 욕실', short: '침실 ' + n, chip: '침실 ' + n, en: 'the bathroom of 침실 ' + n + ' (that bedroom\'s own en-suite bathroom)' }
+      : { key: k, cat: 'balc', bed: n, name: '침실 ' + n + ' 발코니', short: '침실 ' + n + ' 쪽', chip: '침실 ' + n + ' 쪽', en: 'the balcony off 침실 ' + n };
+  }
+  /** 칸에서 고를 수 있는 종류 (beds: 지금 침실 수 — 욕실은 공용 + 침실마다, 발코니는 거실·주방 쪽 + 침실마다) */
+  function usesFor(cat, beds) {
+    var out = ROOM_USES.filter(function (u) { return u.cat === cat && !u.old && u.key !== (catOf(cat) || {}).plain; });   // 침실은 아무것도 안 고르면 그냥 침실
+    for (var i = 1; i <= Math.min(6, beds || 0) && cat !== 'bed'; i++) out.push(useOf((cat === 'bath' ? 'en' : 'bal') + i));
+    return out;
+  }
+  var ROOMS_DEFAULT = ['bed#1', 'pbath#1', 'lbal#1'];   // 처음 작업: 침실 1 · 욕실 1(공용) · 발코니 1(거실 쪽) — 고정 6칸과 합쳐 3×3
+  function catOf(c) { return ROOM_CATS.filter(function (x) { return x.key === c; })[0] || null; }
+  /** 여러 개 공간 칸 열쇠 → { key, use, cat, n, base: '침실 2', short: '서재', name: '침실 2 · 서재', useName, en, room: true } | null */
+  function roomOf(k) {
+    var m = /^([a-z]+[1-6]?)(?:#([1-6]))?$/.exec(String(k || '')), u = m && useOf(m[1]);
+    if (!u) return null;
+    var c = catOf(u.cat), n = m[2] ? +m[2] : 0, base = n ? c.base + ' ' + n : u.name, short = u.short || u.name;
+    var who = c.key === 'bed' ? 'bedroom ' + n + ' (침실 ' + n + (u.key === 'mbed' ? ')' : ' - the room labelled 침실' + n + ' if the plan numbers its bedrooms, otherwise another bedroom)')
+      : c.key === 'bath' ? 'bathroom ' + n + ' (욕실 ' + n + ')' : 'balcony ' + n + ' (발코니 ' + n + ')';
+    var en = !n ? u.en : u.key === c.plain ? who : who + ', ' + (c.key === 'bed' ? 'used as ' : 'that is ') + u.en;
+    return { key: String(k), use: u.key, cat: c.key, n: n, base: base, short: short, useName: u.name, name: n && u.key !== c.plain ? base + ' · ' + short : base, en: en, room: true };
+  }
+  /** 여러 개 공간 칸 목록 다듬기: 아는 종류만, 공간마다 최대 개수까지, 공간마다 차례대로 번호 → { keys, map: { 예전 열쇠: 새 열쇠 } } */
+  function roomsOf(a) {
+    var keys = [], map = {}, cnt = {};
+    (Array.isArray(a) ? a : []).forEach(function (k) {
+      var r = roomOf(k); if (!r) return;
+      var c = catOf(r.cat); if ((cnt[c.key] || 0) >= c.max) return;
+      cnt[c.key] = (cnt[c.key] || 0) + 1;
+      var nk = r.use + '#' + cnt[c.key]; keys.push(nk); if (!(k in map)) map[k] = nk;
+    });
+    return { keys: keys, map: map };
+  }
+  /** 칸 순서 (전체 조감도 → 거실 … → 방들) — 목록·여러 장 정렬용 */
+  function viewIdx(k) {
+    var at = { overview: 0, living: 1, kitchen: 2, powder: 4, entry: 5, hall: 6 }; if (k in at) return at[k];   // 욕실은 주방 다음, 발코니는 복도 다음, 침실은 끝
+    var o = OLD_VIEWS.map(function (v) { return v.key; }).indexOf(k); if (o >= 0) return 20 + o;
+    var r = roomOf(k); return r ? { bath: 3, balc: 7, bed: 8 }[r.cat] + (r.n || 9) / 10 : 99;
+  }
   // 분위기 ('' = 공사 내용(자재)에 맞게)
   var STYLES = [
     { key: '', name: '자재에 맞게', sub: '공사 내용대로', en: 'a tasteful contemporary Korean apartment interior that suits the listed finishes' },
@@ -39,7 +108,7 @@
     { key: 'gray', name: '차분한 그레이', sub: '그레이·차콜', en: 'calm gray tones with charcoal accents, hotel-like' },
     { key: 'classic', name: '클래식', sub: '몰딩·아이보리', en: 'classic style with wall moldings, ivory and walnut tones' },
   ];
-  var MAX_VIEWS = 9;        // 한 번에 만들 수 있는 그림 수
+  var MAX_VIEWS = 18;       // 한 번에 만들 수 있는 그림 수 (고정 6칸 + 침실 6 + 욕실 3 + 발코니 3)
   var MEMO_MAX = 200;       // 요청 사항 글자 수
   var LINE_MAX = 500;       // 공사 내용 한 줄 글자 수 (공사 항목 하나 = 한 줄: '도배: 실크 벽지(LG 베스띠) [화이트 무광], 천장 도배')
   var NOTE_MAX = 60;        // 세부 줄마다 적는 색상·상세 글자 수
@@ -57,7 +126,7 @@
   var CUSTOM_MAX = 20;      // 직접 넣는 줄 수
   var MATS_MAX = 4;         // 자재 사진 (세부 줄마다 하나, 전부 합쳐 4장까지 — 그림 AI에 같이 보냄)
 
-  function viewOf(k) { return VIEWS.filter(function (v) { return v.key === k; })[0] || null; }
+  function viewOf(k) { return VIEWS.filter(function (v) { return v.key === k; })[0] || OLD_VIEWS.filter(function (v) { return v.key === k; })[0] || roomOf(k); }
   function styleOf(k) { return STYLES.filter(function (s) { return s.key === (k || ''); })[0] || STYLES[0]; }
   function t(v, n) { return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n); }
 
@@ -153,8 +222,21 @@
     if (o.x == null || o.y == null) return null;
     if (o.tx == null || o.ty == null || (Math.abs(o.tx - o.x) < 0.01 && Math.abs(o.ty - o.y) < 0.01)) { o.tx = null; o.ty = null; }
     var ar = Number(c.ar); if (isFinite(ar) && ar >= 0.2 && ar <= 5) o.ar = Math.round(ar * 1000) / 1000;
+    var fv = Number(c.fov); if (c.fov != null && isFinite(fv) && fv >= 50 && fv <= 110) o.fov = Math.round(fv);   // 가로 시야각(도) — 관리화면 '시야'
+    if (c.vh === 'high' || c.vh === 'mid' || c.vh === 'low') o.vh = c.vh;   // 카메라 각도 상·중·하 — 관리화면 '각도' (2026-10-30)
     return o;
   }
+  // 카메라 시야 (관리화면에서 작업마다 하나 — 모든 카메라에 같이 씀, 2026-10-30). 예전 그림(시야 없음)은 70°
+  var LENSES = [{ fov: 70, name: '보통' }, { fov: 90, name: '넓게' }, { fov: 105, name: '아주 넓게' }], FOV_DEFAULT = 90;
+  function lensOf(v) { v = Number(v); return LENSES.filter(function (l) { return l.fov === v; }).length ? v : FOV_DEFAULT; }
+  // 카메라 각도 (상·중·하 — 작업마다 하나, 모든 카메라에 같이, 2026-10-30): 카메라 높이 + 수평선 자리(밑그림은 수직선이 곧은 채로 위·아래를 더 담음)
+  var VHS = [
+    { key: 'high', name: '상', sub: '위에서', eye: 1.8, hz: 0.34, en: 'the camera held high, about 1.8 m above the floor, framed from slightly above (a high angle that shows more of the floor and the tops of the furniture)' },
+    { key: 'mid', name: '중', sub: '눈높이', eye: 1.4, hz: 0.5, en: 'the camera at eye level, about 1.4 m above the floor, aimed level' },
+    { key: 'low', name: '하', sub: '아래에서', eye: 0.9, hz: 0.62, en: 'the camera held low, about 0.9 m above the floor, framed from slightly below (a low angle that shows more of the ceiling)' }
+  ], VH_DEFAULT = 'mid';
+  function vhOf(v) { return VHS.filter(function (x) { return x.key === v; })[0] || VHS[1]; }
+  function lensTxt(fov) { return (fov <= 75 ? 'a moderate wide-angle lens' : fov <= 95 ? 'a wide-angle lens' : 'an ultra-wide-angle lens') + ' covering about ' + fov + ' degrees horizontally'; }
   // AI에게 알려 줄 때: 도면 그림 위의 [y, x] (0~1000, 위·왼쪽부터 — Gemini가 그림 위치를 읽는 방식과 같게)
   // 방위: 도면 그림 위쪽 = 북쪽 (오른쪽 = 동, 아래 = 남, 왼쪽 = 서)
   var DIRS = ['top', 'top right', 'right', 'bottom right', 'bottom', 'bottom left', 'left', 'top left'];
@@ -193,7 +275,7 @@
     c = camOf(c); if (!c) return '';
     var pt = function (y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; };
     var i = dirIdx(c);
-    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) + ' (that is, toward the ' + COMPASS[i] + ' of the plan - the ' + DIRS[i] + ' of the plan image)' : ', looking in the most natural direction from there');
+    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) + ' (that is, toward the ' + COMPASS[i] + ' of the plan - the ' + DIRS[i] + ' of the plan image)' : ', looking in the most natural direction from there') + (c.fov ? ', with ' + lensTxt(c.fov) : '') + (c.vh ? ', ' + vhOf(c.vh).en : '');
   }
   /* ---------- 가구·구조·벽 마감 위치 (관리화면 도면에서 한 번 누르면 놓이고, 끌어서 옮기기·돌리기·크기, 2026-10-30) ----------
      { x, y: 놓은 곳(가운데), tx, ty: 앞쪽(식탁은 긴 쪽이 향하는 곳), ar, w: 가로(m) } — 그림 AI에는 카메라에서 본 자리(정면·왼쪽…)로 바꿔 전함 */
@@ -235,12 +317,12 @@
     { key: 'lamp', g: 'deco', name: '스탠드조명', en: 'floor lamp (a standing lamp with a shade)', d: 0.4, w: 0.4, ht: 1.6, nodir: true, multi: true },
   ];
   var FURN_GROUPS = [{ g: 'living', name: '거실' }, { g: 'room', name: '방' }, { g: 'kitchen', name: '주방' }, { g: 'bath', name: '욕실' }, { g: 'struct', name: '구조·벽' }, { g: 'deco', name: '조명·소품' }];
-  var FURN_MULTI = 6;   // 하부장·기둥·가벽은 여러 개 (#2 … #6)
+  var FURN_MULTI = 6;   // 모든 가구를 종류마다 여섯 개까지 (#2 … #6 — 2026-10-30 전에는 하부장·기둥·가벽 등만)
   function furnDef(k) { return FURN.filter(function (f) { return f.key === String(k).split('#')[0]; })[0] || null; }
   // 가구 열쇠: 'sofa' 또는 여러 개 놓는 것은 'col', 'col#2' … → { d: 종류, n: 몇 번째 } | null
   function furnKey(key) {
     var m = /^([a-z]+)(?:#([2-9]))?$/.exec(String(key || '')), d = m && furnDef(m[1]);
-    if (!d || (m[2] && (!d.multi || +m[2] > FURN_MULTI))) return null;
+    if (!d || (m[2] && +m[2] > FURN_MULTI)) return null;
     return { d: d, n: m[2] ? +m[2] : 1 };
   }
   /** 놓인 가구 열쇠를 종류 순서·번호 순서로 */
@@ -259,9 +341,9 @@
     if (!f || typeof f !== 'object' || Array.isArray(f)) return out;
     furnKeys(f).forEach(function (key) {
       var d = furnKey(key).d, src = f[key], c = camOf(src); if (!c) return;
-      var w = Number(src.w); c.w = isFinite(w) && w >= 0.2 && w <= 8 ? Math.round(w * 100) / 100 : d.w;
-      var dp = Number(src.dp); if (src.dp != null && src.dp !== '' && !d.line && !d.nodir && isFinite(dp) && dp >= 0.02 && dp <= 5) c.dp = Math.round(dp * 100) / 100;
-      var h = Number(src.h); if (src.h != null && src.h !== '' && isFinite(h) && h >= 0.1 && h <= 4) c.h = Math.round(h * 100) / 100;
+      var w = Number(src.w); c.w = isFinite(w) && w >= 0.2 && w <= 8 ? Math.round(w * 1000) / 1000 : d.w;   // mm 단위까지 (관리화면은 mm로 적음)
+      var dp = Number(src.dp); if (src.dp != null && src.dp !== '' && !d.line && !d.nodir && isFinite(dp) && dp >= 0.02 && dp <= 5) c.dp = Math.round(dp * 1000) / 1000;
+      var h = Number(src.h); if (src.h != null && src.h !== '' && isFinite(h) && h >= 0.1 && h <= 4) c.h = Math.round(h * 1000) / 1000;
       if (d.nodir) { c.tx = null; c.ty = null; }
       if (d.line) {
         if (c.tx == null) return;
@@ -272,7 +354,7 @@
     return out;
   }
   function pt1000(y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; }
-  function furnArt(d) { return d.multi ? 'a ' : 'the '; }
+  function furnArt(d) { return d.multi ? 'a ' : 'the '; }   // multi = 원래 여러 개 두는 종류 (영어 관사만 — 놓는 개수는 모든 가구가 여섯 개까지)
   function heightTxt(f) { return f.h ? ', ' + f.h + ' m high (not reaching the ceiling)' : ', reaching the ceiling'; }
   function finHtTxt(f) { return f.h ? ', from the floor up to ' + f.h + ' m only (the wall above keeps its normal finish)' : ', covering the full wall height'; }
   // 벽 마감: 마감한 면이 향하는 쪽 (가운데 → 끝 방향을 시계 방향으로 90°) — 도면 가로 단위
@@ -321,7 +403,7 @@
   function furnCam(furn, cam, scale, which, vis) {
     furn = furnOf(furn); cam = camOf(cam);
     if (!cam || cam.tx == null) return '';
-    var ar = cam.ar || 1, out = [];
+    var ar = cam.ar || 1, out = [], hf = (cam.fov || 70) / 2;   // 시야 반(도) — 예전 그림은 70°
     var camA = Math.atan2(cam.tx - cam.x, -(cam.ty - cam.y) * ar);
     var rel = function (x0, y0, x1, y1) { return (((Math.atan2(x1 - x0, -(y1 - y0) * ar) - camA) * 180 / Math.PI) + 540) % 360 - 180; };
     var axisTxt = function (f) { var q = Math.abs(rel(f.x, f.y, f.tx, f.ty)) % 180; q = Math.min(q, 180 - q); return q < 35 ? 'running away from the camera' : q > 55 ? 'running across the photo (left to right)' : 'set diagonally'; };
@@ -331,9 +413,9 @@
       if (d.fin) { var fn0 = finNormal(f); if ((cam.x - f.x) * fn0.x + (cam.y - f.y) * ar * fn0.y <= 0) return; }   // 벽 마감: 카메라가 마감한 면 뒤쪽(벽 건너편)이면 안 보임
       var deg = relDeg(cam, f.x, f.y, ar), m = Math.abs(deg);
       if (d.line) [[f.tx, f.ty], [2 * f.x - f.tx, 2 * f.y - f.ty]].forEach(function (e) { var dd = relDeg(cam, e[0], e[1], ar); if (Math.abs(dd) < m) { m = Math.abs(dd); deg = dd; } });   // 가벽은 한쪽 끝만 보여도
-      if (m > 70) return;   // 사진 밖(옆·뒤)
+      if (m > hf * 2) return;   // 사진 밖(옆·뒤)
       var side = deg > 0 ? 'right' : 'left';
-      var where = m <= 10 ? 'straight ahead (centre of the photo)' : m <= 22 ? 'ahead, slightly ' + side + ' of centre' : m <= 38 ? 'on the ' + side + ' side of the photo' : 'at the ' + side + ' edge of the photo (partly out of frame)';
+      var where = m <= hf * 0.29 ? 'straight ahead (centre of the photo)' : m <= hf * 0.63 ? 'ahead, slightly ' + side + ' of centre' : m <= hf * 1.09 ? 'on the ' + side + ' side of the photo' : 'at the ' + side + ' edge of the photo (partly out of frame)';
       var dist = scale > 0 ? ', about ' + (Math.round(Math.hypot(f.x - cam.x, (f.y - cam.y) * ar) * scale * 10) / 10) + ' m from the camera' : '';
       var face = '';
       if (d.line) face = ', ' + axisTxt(f) + (scale > 0 ? ', about ' + (Math.round(f.L * scale * 10) / 10) + ' m long' : '') + (d.fin ? finHtTxt(f) : heightTxt(f));
@@ -390,7 +472,7 @@
     'Rules for every prompt:',
     '- Photorealistic interior rendering with natural daylight and realistic materials; typical Korean apartment proportions (ceiling about 2.3 m).',
     '- Keep walls, doors, windows and room positions exactly as drawn on the plan. The image model reads floor plans poorly, so describe the layout of the space in words as if the plan were not attached.',
-    '- Single room: eye-level wide-angle view (camera about 1.5 m high). First say where the camera stands and which way it looks, in plan terms (e.g. "camera stands by the kitchen island looking toward the balcony windows"). Then describe, as seen from the camera, the far wall, the left side and the right side: windows or sliding doors and what lies beyond them (e.g. balcony, flower bed), doors and which room they lead to, wide openings to neighbouring spaces (e.g. open kitchen and dining area behind or beside), and built-in elements drawn on the plan (kitchen island, partition walls or louvers, built-in wardrobes, bathtub, shower booth). Give the approximate width and depth of the space in metres from the plan\'s dimensions or areas.',
+    '- Single room: eye-level wide-angle view (camera about 1.5 m high). For a view without a fixed camera, stand in a corner or doorway and look diagonally across the room so that as much of it as possible is in the frame. First say where the camera stands and which way it looks, in plan terms (e.g. "camera stands by the kitchen island looking toward the balcony windows"). Then describe, as seen from the camera, the far wall, the left side and the right side: windows or sliding doors and what lies beyond them (e.g. balcony, flower bed), doors and which room they lead to, wide openings to neighbouring spaces (e.g. open kitchen and dining area behind or beside), and built-in elements drawn on the plan (kitchen island, partition walls or louvers, built-in wardrobes, bathtub, shower booth). Give the approximate width and depth of the space in metres from the plan\'s dimensions or areas.',
     '- Do not add windows, doors or openings that the plan does not show. Ignore shared areas outside the home (stairs, elevators, corridors) and any title text on the plan.',
     '- Some views come with a camera point fixed by the designer, given as [y, x] on the floor plan image normalized to 0-1000 (y from the top edge, x from the left edge), and often a point it looks toward. For those views the plan image may also show a red dot (where the camera stands), a red arrow and a light red wedge (the viewing direction and field of view). Use exactly that standing point and direction: work out which room the point is in, which walls, openings and furniture zones fall inside the wedge, and describe only what is visible from that spot in that direction (what is straight ahead, what is on the left and right edges of the frame). Say the viewing direction in room terms (e.g. "looking diagonally from the balcony-side corner toward the kitchen island and the louvered partition"). If the point is in a different space than the view name, follow the point. Never ask the image model to draw the red marks.',
     '- Some views also come with a guide image: a plain grey 3D massing render of that exact view (camera position, eye height, lens and direction) built from the plan\'s walls. Pale blue-white areas in it are window glass with daylight outside; see-through holes are doors or openings into the next space. The image model receives that guide instead of the floor plan. For those views, write the prompt as instructions to finish that exact grey scene: say what each visible surface of the guide is and which finish it gets (floor, ceiling, the wall straight ahead, the left and right walls, built-in elements), what the windows and door openings look out to, and where furniture goes relative to those walls (e.g. "sofa against the left wall, facing a TV wall straight ahead"). Do not describe a different viewpoint, and do not move, add or remove walls, doors or windows.',
@@ -408,7 +490,7 @@
     '- At most 1200 characters per prompt.',
     '',
     'Also write a Korean caption (at most 50 characters) listing 2 to 4 main finishes visible in that view, e.g. "강마루 바닥 · 실크 벽지 · 우물천장 간접조명".',
-    'Set "found": false only if the plan clearly has no such space (e.g. no dressing room). For 작은방 use the smallest bedroom.',
+    'Set "found": false only if the plan clearly has no such space (e.g. no dressing room). Find each space by the room names written on the plan. Bedroom views are named 침실 1, 침실 2 … like the numbered bedrooms on Korean plans, sometimes with a use after a dot (침실 2 · 서재 = bedroom 2 used as a study). Each is a different room of the home - never use the same room for two of them, and when a camera is fixed, use the room the camera stands in. Without a camera: a bedroom used as 안방 is the main bedroom (the room labelled 안방 or master bedroom (MBR), otherwise the largest bedroom, usually the one with its own bathroom or dressing room); any other 침실 N is the room labelled 침실N if the plan numbers its bedrooms, otherwise the remaining bedrooms from larger to smaller. Furnish each bedroom for its use even if the plan just calls it 침실 (서재 = desk, chair and bookshelves; 아이방 = a child\'s bed, desk and storage; 드레스룸 = clothes storage; 침실 and 손님방 = a bed). Bathroom views are named 욕실 1, 욕실 2 … with whose bathroom it is after a dot (공용 = the shared bathroom off the hallway, often labelled 욕실1 or 공용 욕실; 침실 N = the en-suite bathroom of that bedroom view - for 침실 1 often labelled 욕실2, 안방 욕실 or 부부 욕실), and balcony views 발코니 1, 발코니 2 … (거실 쪽 = the balcony off the living room; 주방 쪽 = the utility balcony or 다용도실 by the kitchen; 침실 N 쪽 = the balcony off that bedroom view); each is a different space. 파우더룸 is the powder room (a vanity area, often by the main bedroom\'s dressing room or bathroom) and 복도 is the hallway. For 욕실 and 발코니 without a number (older requests) use the shared bathroom and the living room balcony. For 안방 (older requests) use the main bedroom the same way; for 작은방 use the smallest bedroom.',
     'Set "plan_ok": false only if the image is clearly not an architectural floor plan.',
     '',
     'Reply with JSON only, no other text:',
@@ -491,6 +573,7 @@
   function imagePrompt(p, marked, guided, cam, o) {
     o = o || {};
     var sn = sidesNote(cam), inp = o.inp || {}, fn = '', wn = '';
+    var ln = cam && cam.fov && !o.overview ? 'Lens: ' + lensTxt(cam.fov) + ' (like a real-estate interior photo)' + (cam.vh ? '; ' + vhOf(cam.vh).en : '') + ', keeping vertical lines straight' + (guided ? ', exactly as wide and as high or low as the guide image.' : '.') : '';
     if (inp.furn) {
       var fc = o.overview ? furnPlan(inp.furn, inp.scale, 'obj') : furnCam(inp.furn, cam, inp.scale, 'obj', inp.vis);
       if (fc) fn = (o.overview ? 'Furniture positions fixed by the designer on the floor plan (keep the plan orientation): ' : 'Furniture fixed by the designer - keep each piece exactly here, as seen from the camera: ') + fc + '.' + (guided && !o.overview ? ' In the guide image these are the darker grey blocks.' : '');
@@ -499,11 +582,11 @@
     }
     var mn = o.mats && o.mats.length ? 'Images labelled "material sample" are photos of the chosen materials: ' + o.mats.map(function (m, i) { return 'material sample ' + (i + 1) + ' = ' + m; }).join('; ') + '. Use each sample\'s exact colour, pattern and texture for that surface wherever it appears in this view; never show the sample photos themselves.' : '';
     var many = o.refs > 1, rn = o.refs > 0 ? (many ? 'The ' + o.refs + ' images labelled "current photo" show' : 'The image labelled "current photo" shows') + ' this same space as it is now, before remodeling: use ' + (many ? 'them' : 'it') + ' only for the real structure (window sizes and positions, sill heights, ceiling, beams, door positions), not for finishes, furniture or decor, and never copy ' + (many ? 'their' : 'its') + ' clutter.' : '';
-    return String(p || '').trim() + '\n\n' + [sn, fn, wn, rn, mn].filter(Boolean).map(function (x) { return x + '\n'; }).join('') + (guided ? GUIDE : (marked ? MARK + '\n' : '') + FINAL);
+    return String(p || '').trim() + '\n\n' + [sn, ln, fn, wn, rn, mn].filter(Boolean).map(function (x) { return x + '\n'; }).join('') + (guided ? GUIDE : (marked ? MARK + '\n' : '') + FINAL);
   }
 
-  return { VIEWS: VIEWS, STYLES: STYLES, MAX_VIEWS: MAX_VIEWS, MEMO_MAX: MEMO_MAX, LINE_MAX: LINE_MAX, NOTE_MAX: NOTE_MAX, COLORS: COLORS, FINISHES: FINISHES, CUSTOM_LEN: CUSTOM_LEN, CUSTOM_MAX: CUSTOM_MAX, viewOf: viewOf, styleOf: styleOf,
-    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText, camDir: camDir, camDirKo: camDirKo, camSides: camSides, sidesText: sidesText,
+  return { VIEWS: VIEWS, OLD_VIEWS: OLD_VIEWS, ROOM_USES: ROOM_USES, ROOM_CATS: ROOM_CATS, catOf: catOf, useOf: useOf, usesFor: usesFor, ROOMS_DEFAULT: ROOMS_DEFAULT, roomOf: roomOf, roomsOf: roomsOf, viewIdx: viewIdx, STYLES: STYLES, MAX_VIEWS: MAX_VIEWS, MEMO_MAX: MEMO_MAX, LINE_MAX: LINE_MAX, NOTE_MAX: NOTE_MAX, COLORS: COLORS, FINISHES: FINISHES, CUSTOM_LEN: CUSTOM_LEN, CUSTOM_MAX: CUSTOM_MAX, viewOf: viewOf, styleOf: styleOf,
+    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, VHS: VHS, VH_DEFAULT: VH_DEFAULT, vhOf: vhOf, LENSES: LENSES, FOV_DEFAULT: FOV_DEFAULT, lensOf: lensOf, camText: camText, camDir: camDir, camDirKo: camDirKo, camSides: camSides, sidesText: sidesText,
     FURN: FURN, FURN_GROUPS: FURN_GROUPS, FURN_MULTI: FURN_MULTI, furnDef: furnDef, furnKey: furnKey, furnKeys: furnKeys, furnOf: furnOf, furnPlan: furnPlan, furnCam: furnCam, REFS_MAX: REFS_MAX, refsOf: refsOf, MATS_MAX: MATS_MAX, matsOf: matsOf,
     SYSTEM: SYSTEM, agentText: agentText, parseAgent: parseAgent, fallback: fallback, imagePrompt: imagePrompt };
 });

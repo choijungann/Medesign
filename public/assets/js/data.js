@@ -43,6 +43,10 @@
     return out;
   }
   function guideOf(r) { var g = r && r.input && r.input.guide; return typeof g === 'string' && /(^|\/)renders\//.test(g) ? g : ''; }
+  // 복사할 때 파일 새 자리: renders/(원래 작업)/… → renders/(새 작업)/… (데모는 앞에 u/)
+  function renderCopyPath(from, oid, nid) { var a = 'renders/' + oid + '/'; return from.indexOf(a) >= 0 ? from.replace(a, 'renders/' + nid + '/') : from.replace(/renders\/[^/]+\//, 'renders/' + nid + '/'); }
+  function copyTitle(t) { t = String(t || '견적서 없이 만든 3D 그림'); return /복사본$/.test(t) ? t : (t + ' · 복사본').slice(0, 120); }
+  function renderCopyDoc(doc, map, oid) { var d = JSON.parse(JSON.stringify(doc || {}), function (k, v) { return typeof v === 'string' && Object.prototype.hasOwnProperty.call(map, v) ? map[v] : v; }); d.copyOf = oid; return d; }
   function renderPlanPath(pid) { return 'renders/' + pid + '/plan-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) + '.jpg'; }
   function renderErr(e) {
     var m = String((e && e.message) || e || '');
@@ -356,6 +360,21 @@
       var r = { id: row.id, estimate_id: row.estimate_id || null, title: String(row.title || '').slice(0, 120), plan_path: row.plan_path || '', est_synced_at: row.est_synced_at || null,
         doc: row.doc || {}, updated_at: new Date().toISOString() };
       return sb().then(function (c) { return c.from('render_projects').upsert(r).select().single().then(check); }).catch(function (e) { throw renderErr(e); });
+    },
+    // 3D 그림 복사 (2026-10-30): 도면·현재 집 사진·자재 사진 파일도 새 작업 자리로 복사 (한쪽을 지워도 다른 쪽 파일은 그대로), 만든 그림은 복사하지 않음
+    copyRenderProject: function (id) {
+      return sb().then(function (c) {
+        return c.from('render_projects').select('*').eq('id', id).maybeSingle().then(check).then(function (p) {
+          if (!p) throw new Error('3D 그림을 찾을 수 없어요. 이미 지웠을 수 있어요.');
+          var nid = uuid(), map = {};
+          return Promise.all(renderPaths([], p).map(function (from) {
+            var to = renderCopyPath(from, id, nid);
+            return c.storage.from(PRIV).copy(from, to).then(function (r) { map[from] = r && r.error ? '' : to; }, function () { map[from] = ''; });   // 없는 파일은 빼고 복사
+          })).then(function () {
+            return Live.saveRenderProject({ id: nid, estimate_id: p.estimate_id, title: copyTitle(p.title), plan_path: map[p.plan_path] || '', est_synced_at: p.est_synced_at, doc: renderCopyDoc(p.doc, map, id) });
+          });
+        });
+      }).catch(function (e) { throw renderErr(e); });
     },
     deleteRenderProject: function (id, o) {
       return sb().then(function (c) {
@@ -1064,6 +1083,14 @@
           plan_path: row.plan_path || '', est_synced_at: row.est_synced_at || null, doc: clone(row.doc || {}) };
         mem.render_projects[r.id] = r;
         return saveRenders().then(function () { return clone(r); });
+      });
+    },
+    copyRenderProject: function (id) {
+      return this.init().then(function () {
+        var p = mem.render_projects[id]; if (!p) throw new Error('3D 그림을 찾을 수 없어요. 이미 지웠을 수 있어요.');
+        var nid = uuid(), map = {};
+        renderPaths([], p).forEach(function (from) { var b = mem.blobs[from]; if (!b) { map[from] = ''; return; } var to = renderCopyPath(from, id, nid); mem.blobs[to] = b; urls[to] = URL.createObjectURL(b); idbPut('blobs', to, b); map[from] = to; });
+        return Demo.saveRenderProject({ id: nid, estimate_id: p.estimate_id, title: copyTitle(p.title), plan_path: map[p.plan_path] || '', est_synced_at: p.est_synced_at, doc: renderCopyDoc(p.doc, map, id) });
       });
     },
     deleteRenderProject: function (id, o) {

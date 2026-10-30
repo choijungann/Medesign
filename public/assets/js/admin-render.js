@@ -20,11 +20,15 @@
   var STALE_QUEUED = 120e3;      // 2분이 지나도 시작을 안 했으면 → 시작하지 못한 것
   var STALE_RUNNING = 15 * 60e3; // 서버 함수는 15분까지만 돎
 
-  var VI = {}; RP.VIEWS.forEach(function (v, i) { VI[v.key] = i; });
-  function vi(r) { return VI[r.view] != null ? VI[r.view] : 99; }
+  function vi(r) { return RP.viewIdx(r.view); }
   // 최근에 만든 것부터, 한 번에 만든 그림은 공간 순서(전체 조감도 → 거실 → …)대로
   function byNewest(a, b) { return (b.created_at || '').localeCompare(a.created_at || '') || vi(a) - vi(b) || (a.id < b.id ? -1 : 1); }
   function viewName(k) { var v = RP.viewOf(k); return v ? v.name : '3D 그림'; }
+  // 화면에 보일 이름 (HTML): '욕실 1' + 종류 배지 '공용' (종류가 없으면 이름만)
+  function viewLabel(k) {
+    var r = RP.roomOf(k), c = r && r.n && RP.catOf(r.cat);
+    return c && r.use !== c.plain ? esc(r.base) + ' <span class="rd-badge">' + esc(r.short) + '</span>' : esc(viewName(k));
+  }
   function styleName(k) { return k ? RP.styleOf(k).name : ''; }
   function ms(iso) { var t = Date.parse(iso || ''); return isFinite(t) ? t : 0; }
   function age(r, col) { var t = ms(r[col] || r.created_at); return t ? Date.now() - t : 0; }
@@ -37,17 +41,50 @@
   function titleOf(e) { return [e && e.customer_name, K.estTitle(e)].filter(Boolean).join(' · ').slice(0, 120); }
   // 견적서가 마지막으로 불러온 뒤에 고쳐졌는지
   function estChanged(p, e) { return !!(e && (!p.est_synced_at || ms(e.updated_at) > ms(p.est_synced_at) + 1000)); }
-  function blankDoc() { return { size: '', sizeEst: '', items: [], custom: [], style: '', memo: '', views: ['overview'], cams: {}, walls: null, furn: {}, refs: [] }; }
+  function blankDoc() { return { size: '', sizeEst: '', items: [], custom: [], style: '', memo: '', views: ['overview'], rooms: RP.ROOMS_DEFAULT.slice(), rv: 2, gone: [], cams: {}, fov: RP.FOV_DEFAULT, vh: RP.VH_DEFAULT, walls: null, furn: {}, refs: [] }; }
   function normDoc(d) {
+    var hadRooms = !!(d && Array.isArray(d.rooms)), rv = d && d.rv;   // 예전 작업인지 (빈 작업 기본값을 넣기 전에 봄) — rv 2 = 침실·욕실·발코니 칸
     d = Object.assign(blankDoc(), d || {});
     d.items = Array.isArray(d.items) ? d.items : []; d.custom = Array.isArray(d.custom) ? d.custom : [];
-    d.views = (Array.isArray(d.views) ? d.views : []).filter(function (k) { return RP.viewOf(k); });
+    // 침실·욕실·발코니 칸 (2026-10-30): 예전 작업은 안방 → 침실 1, 작은방 → 침실 2, 드레스룸 → 침실 n · 드레스룸, 욕실 → 욕실 1 · 공용, 발코니 → 발코니 1 · 거실 쪽 (고른 칸·카메라·현재 집 사진 공간도)
+    var cams0 = d.cams && typeof d.cams === 'object' ? d.cams : {}, views0 = Array.isArray(d.views) ? d.views : [], refs0 = Array.isArray(d.refs) ? d.refs : [];
+    if (rv !== 2) {
+      var used = function (k) { return views0.indexOf(k) >= 0 || !!cams0[k] || refs0.some(function (r) { return r && r.view === k; }); };
+      var uses = hadRooms ? d.rooms.filter(function (k) { return RP.roomOf(k); }) : ['mbed'].concat(used('room') ? ['bed'] : [], used('dress') ? ['dress'] : []);   // 안방 → 침실 1 · 안방
+      var nb = uses.length; uses = uses.concat(['pbath', 'lbal']);
+      var r0 = RP.roomsOf(uses), rk = r0.keys, mv = hadRooms ? Object.assign({}, r0.map) : { master: rk[0], room: used('room') ? rk[1] : null, dress: used('dress') ? rk[nb - 1] : null };
+      mv.bath = rk[nb]; mv.balcony = rk[nb + 1];
+      var ren = function (k) { return k in mv ? mv[k] : k; };
+      d.rooms = rk; d.rv = 2;
+      views0 = views0.map(ren); var c1 = {}; Object.keys(cams0).forEach(function (k) { if (ren(k)) c1[ren(k)] = cams0[k]; }); cams0 = c1;
+      refs0 = refs0.map(function (r) { return r && typeof r === 'object' ? Object.assign({}, r, { view: ren(r.view) || '' }) : r; });
+    }
+    // 욕실·발코니 종류: 잠깐 쓴 안방 욕실·침실 발코니 → 침실 1 욕실·침실 1 쪽, 없는 침실을 가리키면 공용·거실 쪽
+    var nBeds = (Array.isArray(d.rooms) ? d.rooms : []).filter(function (k) { var r = RP.roomOf(k); return r && r.cat === 'bed'; }).length;
+    var fixU = function (k) {
+      var m = /^([a-z]+[1-6]?)(#[1-6])?$/.exec(String(k || '')); if (!m || !RP.roomOf(k)) return k;
+      var u = m[1] === 'mbath' ? 'en1' : m[1] === 'bbal' ? 'bal1' : m[1], x = /^(en|bal)([1-6])$/.exec(u);
+      if (x && +x[2] > nBeds) u = x[1] === 'en' ? 'pbath' : 'lbal';
+      return u + (m[2] || '');
+    };
+    d.rooms = (Array.isArray(d.rooms) ? d.rooms : []).map(fixU); views0 = views0.map(fixU);
+    var c2 = {}; Object.keys(cams0).forEach(function (k) { c2[fixU(k)] = cams0[k]; }); cams0 = c2;
+    refs0 = refs0.map(function (r) { return r && typeof r === 'object' && r.view ? Object.assign({}, r, { view: fixU(r.view) }) : r; });
+    var rm = RP.roomsOf(d.rooms); d.rooms = rm.keys;
+    var keyOf = function (k) { return RP.roomOf(k) ? rm.map[k] || null : RP.VIEWS.some(function (v) { return v.key === k; }) ? k : null; };   // 지금 칸 열쇠 (없는 칸은 null)
+    d.views = views0.map(keyOf).filter(function (k, i, a) { return k && a.indexOf(k) === i; });
     // 카메라 위치: 공간마다 { x, y, tx, ty } (도면 그림 안의 비율 0~1, 전체 조감도는 없음)
-    var cams = {}; Object.keys(d.cams && typeof d.cams === 'object' ? d.cams : {}).forEach(function (k) { var c = RP.camOf(d.cams[k]); if (c && k !== 'overview' && RP.viewOf(k)) cams[k] = c; });
+    var cams = {}; Object.keys(cams0).forEach(function (k) { var nk = keyOf(k), c = RP.camOf(cams0[k]); if (c && nk && nk !== 'overview') cams[nk] = c; });
     d.cams = cams;
+    d.refs = refs0;
+    d.fov = RP.lensOf(d.fov);   // 카메라 시야(가로 도) — 보통 70 · 넓게 90 · 아주 넓게 105, 모든 카메라에 같이
+    d.vh = RP.vhOf(d.vh).key;   // 카메라 각도 상·중·하 (기본 중 = 눈높이), 모든 카메라에 같이
     d.walls = RW ? RW.clean(d.walls) : (d.walls || null);   // 3D 밑그림용 벽 선 (도면 그림 안의 비율 0~1)
     d.furn = RP.furnOf(d.furn);    // 가구 위치 (카메라와 같은 방식: 놓을 곳 → 앞쪽)
-    d.refs = RP.refsOf(d.refs);    // 현재 집 사진 (참고용) [{ path, view }]
+    // 지운 고정 공간 (거실·주방·파우더룸·현관·복도 — 이 집에 없는 공간, 2026-10-30): 칸에서 빠지고 '방 추가'로 다시 넣음
+    d.gone = (Array.isArray(d.gone) ? d.gone : []).filter(function (k, i, a) { return k !== 'overview' && RP.VIEWS.some(function (v) { return v.key === k; }) && a.indexOf(k) === i; });
+    d.views = d.views.filter(function (k) { return d.gone.indexOf(k) < 0; }); d.gone.forEach(function (k) { delete d.cams[k]; });
+    d.refs = RP.refsOf(d.refs).map(function (r) { return Object.assign(r, { view: r.view && keyOf(r.view) && d.gone.indexOf(keyOf(r.view)) < 0 ? keyOf(r.view) : '' }); });    // 현재 집 사진 (참고용) [{ path, view }]
     return d;
   }
   /** 견적서 내용을 작업에 넣기 (keep: 같은 견적서를 다시 불러올 때 넣기/빼기를 그대로) → 바뀐 점 목록 */
@@ -113,9 +150,11 @@
         var x = info(p);
         var pills = (p.busy_count ? '<span class="pill star">만드는 중 ' + p.busy_count + '장</span>' : '') +
           (x.e && estChanged(p, x.e) ? '<span class="pill warn">견적서가 바뀌었어요</span>' : '') +
-          (!x.e && p.title && p.title.indexOf('견적서 없이') !== 0 ? '<span class="pill off">견적서 없음</span>' : '');   // 견적서가 지워진 것만 (처음부터 견적서 없이 만든 것은 이름에 나옴)
+          (!x.e && p.title && p.title.indexOf('견적서 없이') !== 0 ? '<span class="pill off">견적서 없음</span>' : '') +   // 견적서가 지워진 것만 (처음부터 견적서 없이 만든 것은 이름에 나옴)
+          (x.e && /복사본$/.test(p.title || '') ? '<span class="pill off">복사본</span>' : '');   // 견적서 이름으로 보이는 카드는 복사본 표시 (견적서 없는 것은 이름 끝에 '· 복사본')
         return '<div class="item has-del rd-card">' +
           '<button class="item-del" type="button" data-pdel="' + esc(p.id) + '" aria-label="이 3D 그림 지우기">' + I.trash + '<span>지우기</span></button>' +
+          '<button class="item-copy" type="button" data-pcopy="' + esc(p.id) + '" aria-label="이 3D 그림을 복사해서 새로 만들기">' + I.copy + '<span>복사</span></button>' +   // 견적서·계약서 카드와 같은 자리
           '<a class="item-top rd-open" href="#/render/' + encodeURIComponent(p.id) + '"><div class="item-thumb rd-thumb" data-cover="' + esc(p.cover || '') + '">' + (p.cover ? '' : I.cube) + '</div>' +
           '<div class="item-txt"><div class="item-title">' + esc(x.name) + '</div>' +
           (x.who ? '<div class="rd-who">' + esc(x.who) + '</div>' : '') +
@@ -146,6 +185,11 @@
       page.addEventListener('click', function (ev) {
         var x;
         if ((x = ev.target.closest('[data-rnew]'))) return startNew(x);
+        if ((x = ev.target.closest('[data-pcopy]'))) {   // 복사: 공사 내용·도면·벽 선·가구·카메라·사진까지 새 작업으로 (만든 그림은 빼고) → 바로 그 작업 화면으로
+          if (x.disabled) return;
+          x.disabled = true; x.querySelector('span').textContent = '복사 중…';
+          return DB.copyRenderProject(x.getAttribute('data-pcopy')).then(function (r) { K.go('#/render/' + encodeURIComponent(r.id)); }, function (err) { x.disabled = false; x.querySelector('span').textContent = '복사'; oops('복사하지 못했어요', err); });
+        }
         if ((x = ev.target.closest('[data-pdel]'))) {
           var id = x.getAttribute('data-pdel'), p = list.filter(function (y) { return y.id === id; })[0], nm = p ? info(p).name : '3D 그림';
           return K.ask({ title: '이 3D 그림을 지울까요?', text: '<b>' + esc(nm) + '</b> · 그림 ' + ((p && p.image_count) || 0) + '장<br>휴지통에 <b>30일</b> 동안 보관돼서 그동안은 <b>설정 → 휴지통</b>에서 되살릴 수 있어요. 견적서는 그대로예요.',
@@ -163,7 +207,83 @@
   /* =====================================================================
      작업 화면
      ===================================================================== */
+  /* ---------- 가구 처음 크기 (설정 → 3D 그림 가구 크기 — 2026-10-30) ----------
+     { sofa: { w, d, h } } (m, 고친 것만). 가구를 도면에 처음 놓을 때만 씀 — 이미 놓은 가구는 그대로. 구조·벽(기둥·가벽·벽 마감)은 빼고 */
+  var FSZ_KEY = 'render_furn_size', FSZ = null;
+  function fszKinds() { return RP.FURN.filter(function (f) { return f.g !== 'struct'; }); }
+  function fszFields(f) { return f.nodir ? ['w', 'h'] : f.mount ? ['w', 'h'] : ['w', 'd', 'h']; }
+  var FSZ_LIM = { w: [0.2, 8], d: [0.02, 5], h: [0.1, 4] };
+  function fszClean(v) {
+    var out = {}; if (!v || typeof v !== 'object') return out;
+    fszKinds().forEach(function (f) {
+      var src = v[f.key]; if (!src || typeof src !== 'object') return;
+      var o = {};
+      fszFields(f).forEach(function (k) { var n = Number(src[k]); if (src[k] != null && src[k] !== '' && isFinite(n) && n >= FSZ_LIM[k][0] && n <= FSZ_LIM[k][1]) o[k] = Math.round(n * 1000) / 1000; });
+      if (Object.keys(o).length) out[f.key] = o;
+    });
+    return out;
+  }
+  function loadFsz() {
+    if (FSZ) return Promise.resolve(FSZ);
+    return (DB.getAdminSetting ? DB.getAdminSetting(FSZ_KEY) : Promise.resolve(null)).then(function (v) { FSZ = fszClean(v); return FSZ; }, function () { return {}; });
+  }
+  function sizeOf(def) { var s = (FSZ && FSZ[def.key]) || {}; return { w: s.w || def.w, d: s.d || def.d, h: s.h || null, cd: s.d || null }; }
+
+  // 가구 자석 켜짐 (이 브라우저에 기억 — 처음은 켜짐)
+  function magGet() { try { return localStorage.getItem('rd-mag') !== '0'; } catch (e) { return true; } }
+  function magSet(on) { try { localStorage.setItem('rd-mag', on ? '1' : '0'); } catch (e) {} }
+  function magOk(def) { return !!def && !def.line && !def.hang; }
+
+  function viewFurnSize() {
+    K.frame('3D 그림 가구 크기', true, 'settings');
+    K.state.backTo = '#/settings';
+    app.innerHTML = '<div class="page"><div class="loading">불러오는 중…</div></div>';
+    var mm = function (v) { return String(Math.round(Number(v) * 1000)); };
+    FSZ = null;   // 다른 기기에서 고쳤을 수 있으니 새로 읽음
+    loadFsz().then(function (cur) {
+      var page = document.createElement('div');
+      page.className = 'page fs-page';
+      var NAME = { w: '가로', d: '깊이', h: '높이' };
+      var row = function (f) {
+        var c = cur[f.key] || {}, ht = f.ht == null ? '천장' : mm(f.ht);
+        return '<div class="fs-row"><b class="fs-name">' + esc(f.name) + '</b><div class="fs-nums">' + fszFields(f).map(function (k) {
+          var nm = f.nodir || f.mount ? (k === 'w' ? '크기' : f.mount ? '거는 높이' : '높이') : NAME[k];
+          var ph = k === 'h' ? ht : mm(k === 'w' ? f.w : f.d);
+          return '<label class="fs-num"><span>' + nm + ' <small>(mm)</small></span><input class="input" data-fs="' + f.key + '" data-ff="' + k + '" inputmode="numeric" maxlength="5" value="' + (c[k] ? mm(c[k]) : '') + '" placeholder="' + esc(ph) + '" aria-label="' + esc(f.name + ' ' + nm) + '(밀리미터)"></label>';
+        }).join('') + '</div></div>';
+      };
+      page.innerHTML = '<p class="us-lead">가구를 도면에 <b>처음 놓을 때의 크기</b>예요. 비워 두면 흐린 숫자(기본 크기)로 놓여요. 이미 놓은 가구는 바뀌지 않아요. 높이 칸의 \'천장\'은 천장까지 닿는다는 뜻이에요.</p>' +
+        RP.FURN_GROUPS.filter(function (g) { return g.g !== 'struct'; }).map(function (g) {
+          return '<section class="txt-card fs-card"><h2>' + esc(g.name) + '</h2>' + RP.FURN.filter(function (f) { return f.g === g.g; }).map(row).join('') + '</section>';
+        }).join('') +
+        '<div class="savebar" id="fs-bar" hidden><p class="msg" id="fs-msg" hidden></p><button class="btn btn-primary" type="button" data-fssave>' + I.check + '저장</button></div>';
+      app.innerHTML = ''; app.appendChild(page);
+      page.addEventListener('input', function (e) {
+        if (!e.target.hasAttribute('data-fs')) return;
+        $('#fs-bar', page).hidden = false; $('#fs-msg', page).hidden = true; K.setDirty(true);
+      });
+      page.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-fssave]'); if (!b) return;
+        var out = {}, bad = null;
+        $$('[data-fs]', page).forEach(function (el) {
+          var v = String(el.value).replace(/[,\s]/g, ''); if (!v || bad) return;
+          var k = el.getAttribute('data-ff'), n = parseFloat(v) / 1000, lim = FSZ_LIM[k];
+          if (!(isFinite(n) && n >= lim[0] && n <= lim[1])) { bad = { el: el, k: k, lim: lim }; return; }
+          (out[el.getAttribute('data-fs')] = out[el.getAttribute('data-fs')] || {})[k] = Math.round(n * 1000) / 1000;
+        });
+        var msg = $('#fs-msg', page);
+        if (bad) { var f = RP.furnDef(bad.el.getAttribute('data-fs')); msg.textContent = '‘' + f.name + '’ 칸은 ' + mm(bad.lim[0]) + '~' + mm(bad.lim[1]) + ' 사이 숫자로 적어 주세요'; msg.hidden = false; bad.el.focus(); return; }
+        b.disabled = true;
+        (DB.saveAdminSetting ? DB.saveAdminSetting(FSZ_KEY, out) : Promise.resolve()).then(function () {
+          FSZ = fszClean(out); cur = FSZ;
+          K.setDirty(false); b.disabled = false; $('#fs-bar', page).hidden = true;
+        }).catch(function (err) { b.disabled = false; msg.textContent = K.friendlyError ? K.friendlyError(err) : '저장하지 못했어요'; msg.hidden = false; });
+      });
+    });
+  }
+
   function viewProject(id) {
+    loadFsz();   // 가구 처음 크기 (설정)
     K.frame('3D 그림', true, 'renders');
     K.state.backTo = '#/renders';
     app.innerHTML = '<div class="page"><div class="loading">불러오는 중…</div></div>';
@@ -193,8 +313,8 @@
     page.className = 'page rd-page';
     app.innerHTML = ''; app.appendChild(page);
     var d = p.doc;
-    var st = { rows: images.slice().sort(byNewest), urls: {}, working: false, timer: null, saveT: null, saving: null, planBusy: false, open: {}, pal: '', cam: '', camStep: '',
-      // 3D 밑그림: wall 벽 고치는 중 · wtool 'pick'(고르기) | 'draw'(선 긋기) · wkind 그을 선 종류 · wsel 고른 선 · wa 긋기 시작점 · wh 되돌리기 · wbusy 벽 따는 중
+    var st = { mag: magGet(), rows: images.slice().sort(byNewest), urls: {}, working: false, timer: null, saveT: null, saving: null, planBusy: false, open: {}, pal: '', cam: '', camStep: '',
+      // 3D 밑그림: wall 벽 고치는 중 · wtool 'pick'(벽 수정) | 'draw'(벽 생성) · wkind 그을 선 종류 · wsel 고른 선 · wa 긋기 시작점 · wh 되돌리기 · wbusy 벽 따는 중
       furn: '', add: '', refBusy: false,   // furn: 고른 가구(열쇠) · add: 새로 놓으려고 누른 가구 종류 · refBusy: 현재 집 사진 올리는 중
       wall: false, wtool: 'pick', wkind: 'w', wsel: -1, wa: null, wh: [], wbusy: false, ptr: null, drag: null, hover: null, gcache: {} };
 
@@ -210,7 +330,22 @@
       st.saveT = setTimeout(function () { run().catch(function () {}); }, 600);
       return Promise.resolve();
     }
-    function picked() { return RP.VIEWS.filter(function (v) { return d.views.indexOf(v.key) >= 0; }).map(function (v) { return v.key; }); }
+    function catKeys(c) { return d.rooms.filter(function (k) { return RP.roomOf(k).cat === c; }); }
+    // 화면 순서: 전체 조감도 · 거실 · 주방 · 욕실들 · 파우더룸 · 현관 · 복도 · 발코니들 · 침실들
+    function fixed(a) { return a.filter(function (k) { return d.gone.indexOf(k) < 0; }); }   // 지우지 않은 고정 공간
+    function allViews() { return ['overview'].concat(fixed(['living', 'kitchen']), catKeys('bath'), fixed(['powder', 'entry', 'hall']), catKeys('balc'), catKeys('bed')); }   // 고정 칸 + 이 작업의 방들 (화면 순서)
+    function picked() { return allViews().filter(function (k) { return d.views.indexOf(k) >= 0; }); }
+    // 예전 그림(안방·작은방)을 다시 만들 때: 지금 방 칸으로 (침실·침실 2) — 없으면 뺌
+    function nowKey(k) {
+      if (allViews().indexOf(k) >= 0) return k;
+      var beds = d.rooms.filter(function (x) { return RP.roomOf(x).use === 'bed'; });
+      if (k === 'bath') return catKeys('bath')[0] || '';            // 예전 욕실 → 욕실 1
+      if (k === 'balcony') return catKeys('balc')[0] || '';         // 예전 발코니 → 발코니 1
+      if (k === 'master') return catKeys('bed').filter(function (x) { return RP.roomOf(x).use === 'mbed'; })[0] || catKeys('bed')[0] || '';   // 안방 → 안방으로 쓰는 침실
+      if (k === 'room') return beds[1] || beds[0] || '';             // 작은방 → 둘째 침실
+      var r = RP.roomOf(k); if (!r) return '';                       // 번호 없는 예전 방 열쇠('study' 등) → 같은 용도의 첫 방
+      return d.rooms.filter(function (x) { return RP.roomOf(x).use === r.use; })[0] || '';
+    }
     function current() { return RP.compose(d); }
     function isOld(r) { return r.status === 'done' && !RP.sameContent(r.input, current()); }
     // 공간마다 가장 최근 그림이 예전 공사 내용이면 → '바뀐 내용으로 다시 만들기' 대상
@@ -220,7 +355,7 @@
         if (seen[r.view] || r.status !== 'done') return;
         seen[r.view] = true; if (isOld(r)) out.push(r.view);
       });
-      return out.sort(function (a, b) { return (VI[a] || 0) - (VI[b] || 0); });
+      return out.map(nowKey).filter(function (k, i, a) { return k && a.indexOf(k) === i; }).sort(function (a, b) { return RP.viewIdx(a) - RP.viewIdx(b); });
     }
 
     /* ----- 그리기 ----- */
@@ -302,27 +437,71 @@
         }).join('') + '</div>' : '') +
         (d.custom.length < RP.CUSTOM_MAX ? '<div class="est-addcat rd-addc"><input class="input" id="rd-new" maxlength="' + RP.CUSTOM_LEN + '" placeholder="예) 거실 한쪽 벽 우드 포인트" aria-labelledby="rd-cust-l">' +
           '<button type="button" class="btn btn-outline" data-cadd>' + I.plus + '추가</button></div>' : '') +
-        '<div class="field rd-size"><label for="rd-size">평수</label><div class="est-suffix"><input class="input" id="rd-size" inputmode="decimal" maxlength="6" value="' + esc(d.size) + '" placeholder="예) 32"><span>평</span></div></div>' +
+        '<div class="field rd-size"><label for="rd-size">평수</label><div class="py-pair"><div class="est-suffix"><input class="input" id="rd-size" data-py inputmode="decimal" maxlength="6" value="' + esc(d.size) + '" placeholder="예) 32"><span>평</span></div>' + K.m2Field(d.size, 'est-suffix') + '</div></div>' +   // 오른쪽 ㎡ (서로 저절로)
         '</div>';
     }
     /* ----- 카메라 위치: 공간 단추를 누르고 도면에서 서 있을 곳 → 바라볼 곳을 차례로 누름 ----- */
     function camKeys() { return picked().filter(function (k) { return k !== 'overview'; }); }
-    function camRow() {
-      var ks = camKeys(); if (!ks.length || !p.plan_path) return '';
-      if (st.cam && ks.indexOf(st.cam) < 0) { st.cam = ''; st.camStep = ''; }
-      var tip = !st.cam ? '' : '<div class="rd-cam-tip" role="status"><span><b>' + esc(viewName(st.cam)) + '</b> · ' + (st.camStep === 'dir' ? '바라볼 쪽을 누르세요' : '도면에서 서 있을 곳을 누르세요') + '</span>' +
-        (d.cams[st.cam] ? '<button type="button" class="rd-cam-clear" data-camclear>자동으로</button>' : '') + '</div>';
-      return '<div class="rd-cam"><span class="rd-cam-l" id="rd-cam-l">카메라 위치 <span class="opt">(선택)</span></span>' +
-        '<div class="rd-cam-chips" role="group" aria-labelledby="rd-cam-l">' + ks.map(function (k) {
-          var on = st.cam === k, set = !!d.cams[k];
-          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (set ? ' set' : '') + '" data-cam="' + esc(k) + '" aria-pressed="' + on + '">' + (set ? I.check : '') + '<span>' + esc(viewName(k)) + '</span></button>';
-        }).join('') + '</div>' + tip + '</div>';
+    // 칸 제목 줄: 제목 (선택) + 오른쪽 초기화 단추 (놓은·찍은 것이 있을 때만)
+    var RESET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/></svg>';
+    function secHd(id, title, btn) { return '<div class="rd-sec-hd"><span class="rd-cam-l" id="' + id + '">' + title + ' <span class="opt">(선택)</span></span>' + (btn || '') + '</div>'; }
+    // 카메라 위치 칸 (2026-10-30 다시 짬): 늘 같은 모양 — 공간 단추(고르기) · 카메라 찍기/카메라 자동 · 안내 한 줄 · 시야 · 각도
+    //   공간 단추는 고르기만 하고, 도면에 찍는 것은 '카메라 찍기' 단추로 (전에는 공간 단추를 누르면 바로 찍기라 헷갈렸음)
+    function camSelKey(ks) { ks = ks || camKeys(); if (ks.indexOf(st.camSel) < 0) st.camSel = ks[0] || ''; return st.camSel; }
+    // 카메라 자동(켜짐 = 그 공간 카메라를 AI가 정함, 기본). 꺼짐 = 직접 찍은 카메라가 있거나 지금 찍는 중일 때뿐 —
+    // 끄고 아무것도 안 찍은 채 그만두면 저절로 다시 자동 (2026-10-30: '자동도 아니고 찍지도 않은' 어정쩡한 상태를 없앰). 켜서 치운 카메라는 st.camBak 에 (다시 끄면 되살림)
+    function camAuto(k) { return !d.cams[k] && st.cam !== k; }
+    // 라디오 한 줄: ◯ 이름 + 작은 설명 (+ 오른쪽 단추)
+    function camMode(v, name, sub, on, extra) {
+      return '<div class="rd-mode-row' + (on ? ' on' : '') + '"><button type="button" class="rd-mode" role="radio" aria-checked="' + on + '" data-cammode="' + v + '"><span class="rd-radio" aria-hidden="true"></span><span class="rd-mode-t"><b>' + name + '</b><small>' + sub + '</small></span></button>' + extra + '</div>';
     }
+    function camMsg(ks) {
+      var sel = camSelKey(ks), c = d.cams[sel], n = !c ? 0 : c.tx == null ? 1 : 2;
+      if (st.cam) return st.camStep === 'dir' ? (st.camNear ? '서 있는 곳에서 조금 더 떨어진 곳을 누르세요' : '② 바라볼 쪽을 도면에서 누르세요 · 안 누르면 바라보는 쪽은 AI가 정해요') : '① 서 있을 곳을 도면에서 누르세요 · 안 찍고 그만두면 다시 자동이 돼요';
+      if (camAuto(sel)) return '직접 찍기를 고르면 도면에서 카메라 자리를 정할 수 있어요';
+      return n === 2 ? '카메라를 찍었어요 · 고치려면 다시 찍기를 누르세요' : '서 있을 곳만 찍었어요 · 바라보는 쪽은 AI가 정해요';
+    }
+    function camRow() {
+      var ks = camKeys(); if (!p.plan_path) return '';
+      if (st.cam && ks.indexOf(st.cam) < 0) { st.cam = ''; st.camStep = ''; }
+      var sel = camSelKey(ks), any = Object.keys(d.cams).length > 0;
+      var hd = '<div class="rd-cam">' + secHd('rd-cam-l', '카메라 위치', '<button type="button" class="rd-cam-clear rd-del rd-reset" data-camreset' + (any ? '' : ' disabled') + '>' + RESET + '<span>초기화</span></button>');
+      if (!ks.length) return hd + '<p class="rd-sec-empty">만들 그림에서 공간(거실·침실 등)을 고르면 공간마다 카메라를 찍을 수 있어요</p></div>';   // 칸은 늘 있음 — 고른 공간이 없을 때는 안내만
+      return hd +
+        '<div class="rd-cam-chips rd-camsel-chips" role="radiogroup" aria-labelledby="rd-cam-l">' + ks.map(function (k) {
+          var on = sel === k, set = !!d.cams[k];
+          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (set ? ' set' : '') + '" data-camsel="' + esc(k) + '" role="radio" aria-checked="' + on + '"' + (set ? ' aria-description="위치 찍음"' : '') + '><span>' + viewLabel(k) + '</span></button>';   // 고르기만 (찍은 공간은 색칠)
+        }).join('') + '</div>' +
+        // 고른 공간의 카메라 칸 (흰 상자 — 가구를 골랐을 때 아래 칸과 같은 층): 찍기·자동 단추 + 안내 한 줄 (공간 단추와 모양·층을 다르게, 2026-10-30)
+        '<div class="rd-cam-panel" role="group" aria-label="고른 공간 카메라"><div class="rd-cam-modes" role="radiogroup" aria-label="카메라 정하기">' +   // 위아래 두 가지 중 하나 (2026-10-30 — 켜고 끄기 대신)
+          camMode('auto', '카메라 자동', 'AI가 도면을 보고 자리를 정해요', camAuto(sel), '') +
+          camMode('manual', '직접 찍기', '서 있을 곳 → 바라볼 쪽', !camAuto(sel),
+            '<button type="button" class="rd-wbtn' + (st.cam ? ' on' : '') + '" data-camgo aria-pressed="' + !!st.cam + '"' + (camAuto(sel) ? ' disabled' : '') + '>' + I.camera + '<span>' + (st.cam ? '그만' : '다시 찍기') + '</span></button>') +   // 찍는 중 = 그만, 찍은 뒤 = 다시 찍기 (자동일 때는 흐리게)
+        '</div>' +
+        '<p class="rd-cam-msg" role="status">' + camMsg(ks) + '</p></div>' +
+        lensRow() + vhRow() + '</div>';
+    }
+    // 카메라 시야: 넓을수록 방이 많이 담김 (도면의 부채꼴·밑그림·AI 글이 같이 바뀜) — 늘 보임
+    function lensRow() {
+      return '<div class="rd-lens" role="radiogroup" aria-labelledby="rd-lens-l"><span class="rd-lens-l" id="rd-lens-l">시야</span>' + RP.LENSES.map(function (l) {
+        var on = d.fov === l.fov;
+        return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + '" data-lens="' + l.fov + '" role="radio" aria-checked="' + on + '"><span>' + esc(l.name) + ' <small>' + l.fov + '°</small></span></button>';
+      }).join('') + '</div>';
+    }
+    // 카메라 각도 상·중·하: 카메라 높이 (밑그림·AI 글이 같이 바뀜) — 늘 보임
+    function vhRow() {
+      return '<div class="rd-lens" role="radiogroup" aria-labelledby="rd-vh-l"><span class="rd-lens-l" id="rd-vh-l">각도</span>' + RP.VHS.map(function (v) {
+        var on = d.vh === v.key;
+        return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + '" data-vh="' + v.key + '" role="radio" aria-checked="' + on + '"><span>' + esc(v.name) + ' <small>' + esc(v.sub) + '</small></span></button>';
+      }).join('') + '</div>';
+    }
+    function camFull(k) { var c = d.cams[k]; return c ? Object.assign({}, c, { fov: d.fov, vh: d.vh }) : null; }   // 시야·각도를 붙인 카메라
     // 도면 위에 카메라 표시 (그림과 같은 비율로 겹치는 svg — 도면은 object-fit: contain)
     function drawCams() {
       var img = $('#rd-plan-img', page), svg = $('#rd-cam-svg', page);
       if (!img || !svg) return;
       if (!img.naturalWidth) { img.addEventListener('load', drawCams, { once: true }); return; }
+      st.planWH = { src: img.getAttribute('src'), w: img.naturalWidth, h: img.naturalHeight };   // 다시 그릴 때 그림 자리를 미리 잡아 둠 (화면이 위로 튀지 않게)
       applyZoom();
       // 표시 크기를 화면 픽셀로 맞춤 (도면이 커도 작아도 점·글자가 같은 크기로 보이게)
       var W = img.naturalWidth, H = img.naturalHeight, bx = img.getBoundingClientRect(), sc = Math.min(bx.width / W, bx.height / H), R = sc > 0 ? 1 / sc : Math.max(W, H) / 400;
@@ -330,10 +509,15 @@
       var mk = function (id) { return '<marker id="' + id + '" class="' + id + '" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0 10 5 0 10z"/></marker>'; };
       svg.innerHTML = '<defs>' + mk('rd-ah') + mk('rd-ah-on') + mk('rd-fah') + '</defs>' + furnSvg(W, H, R) +
         camKeys().filter(function (k) { return d.cams[k]; }).map(function (k) {
-          var c = d.cams[k], x = c.x * W, y = c.y * H, on = st.cam === k ? ' on' : '';
+          var c = d.cams[k], x = c.x * W, y = c.y * H, on = (st.cam || camSelKey()) === k ? ' on' : '';   // 고른 공간의 카메라는 파랗게
+          var fov = '';   // 시야 부채꼴 (찍을 때 담기는 범위)
+          if (c.tx != null) {
+            var fa = Math.atan2(c.ty * H - y, c.tx * W - x), fl = Math.max(Math.hypot(c.tx * W - x, c.ty * H - y) * 1.15, 60 * R), fh = d.fov / 2 * Math.PI / 180;
+            fov = '<path class="rd-cam-fov" d="M' + x.toFixed(1) + ' ' + y.toFixed(1) + ' L' + (x + Math.cos(fa - fh) * fl).toFixed(1) + ' ' + (y + Math.sin(fa - fh) * fl).toFixed(1) + ' A' + fl.toFixed(1) + ' ' + fl.toFixed(1) + ' 0 0 1 ' + (x + Math.cos(fa + fh) * fl).toFixed(1) + ' ' + (y + Math.sin(fa + fh) * fl).toFixed(1) + ' Z"/>';
+          }
           var arrow = c.tx != null ? '<line x1="' + x + '" y1="' + y + '" x2="' + (c.tx * W) + '" y2="' + (c.ty * H) + '" stroke-width="' + (2.5 * R) + '" marker-end="url(#rd-ah' + (on ? '-on' : '') + ')"/>' : '';
-          return '<g class="rd-cam-mk' + on + '">' + arrow + '<circle cx="' + x + '" cy="' + y + '" r="' + (7 * R) + '" stroke-width="' + (2.5 * R) + '"/>' +
-            '<text x="' + x + '" y="' + (y - 12 * R) + '" font-size="' + (13 * R) + '" stroke-width="' + (3.5 * R) + '">' + esc(viewName(k)) + '</text></g>';
+          return '<g class="rd-cam-mk' + on + '">' + fov + arrow + '<circle cx="' + x + '" cy="' + y + '" r="' + (7 * R) + '" stroke-width="' + (2.5 * R) + '"/>' +
+            '<text x="' + x + '" y="' + (y - 12 * R) + '" font-size="' + (13 * R) + '" stroke-width="' + (3.5 * R) + '">' + esc((RP.roomOf(k) && RP.roomOf(k).n) ? RP.roomOf(k).base : viewName(k)) + '</text></g>';
         }).join('');
     }
     /* ----- 가구 위치: 단추를 누르고 도면에서 놓을 곳 → 앞쪽을 차례로 누름 (카메라와 같은 방식) -----
@@ -342,26 +526,38 @@
     function nextKey(kind) { for (var n = 1; n <= RP.FURN_MULTI; n++) { var k = n === 1 ? kind : kind + '#' + n; if (!d.furn[k]) return k; } return ''; }
     var ROT_L = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v6h6"/><path d="M4.5 10A8 8 0 1 1 6 17"/></svg>';
     var ROT_R = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v6h-6"/><path d="M19.5 10A8 8 0 1 0 18 17"/></svg>';
+    // 단위: 화면은 모두 mm (저장은 지금처럼 m — 2026-10-30)
+    function toMM(m) { return String(Math.round(Number(m) * 1000)); }
+    function fromMM(v) { var n = parseFloat(String(v).replace(/[,\s]/g, '')); return isFinite(n) ? n / 1000 : NaN; }   // '1,600' · '1600' → 1.6 (m)
+    // mm 칸 옆에 미터 병기 (글자만 — 2026-10-30): 1600 → '(1.6 m)' · 비어 있으면 기본값(숫자 안내글)으로
+    function mOf(v) { var n = fromMM(v); return n > 0 ? '(' + +n.toFixed(3) + ' m)' : ''; }   // 괄호로 감쌈
+    function mTag(v) { return '<span class="rd-m" aria-hidden="true">' + mOf(v) + '</span>'; }
     function numIn(attr, label, val, ph, name) {
-      return '<label class="rd-wnum">' + label + '<input class="input" ' + attr + ' inputmode="decimal" maxlength="4" value="' + (val != null ? Number(val).toFixed(2).replace(/0$/, '') : '') + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + ' aria-label="' + esc(name + ' ' + label) + '(미터)"><span>m</span></label>';
+      return '<label class="rd-wnum"><span class="rd-wnum-l">' + label + ' <small>(mm)</small></span>' + mTag(val != null ? toMM(val) : ph) + '<input class="input" ' + attr + ' inputmode="numeric" maxlength="5" value="' + (val != null ? toMM(val) : '') + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + ' aria-label="' + esc(name + ' ' + label) + '(밀리미터)"></label>';   // 단위는 이름 옆 — 칸은 숫자만 (휴대폰에서 다섯 자리도 안 잘리게)
     }
     function furnRow() {
       if (!p.plan_path || !st.urls[p.plan_path]) return '';
       var cur = st.furn && d.furn[st.furn], def = cur ? RP.furnDef(st.furn) : st.add ? RP.furnDef(st.add) : null, box = '';
-      if (st.add && def) box = '<div class="rd-cam-tip rd-furn-tip" role="status"><span class="rd-furn-msg"><b>' + esc(def.name) + '</b> · ' +
-        (def.fin ? (hasWalls() ? '마감할 벽의 방 쪽 가까이를 누르세요' : '도면에서 놓을 곳을 누르세요') : '도면에서 놓을 곳을 누르세요' + (hasWalls() && !def.axis && !def.nodir && !def.line ? ' (벽 가까이 누르면 벽에 붙어요)' : '')) + '</span></div>';
+      if (st.add && def) box = '<div class="rd-cam-tip rd-furn-tip rd-furn-adding" role="status"><span class="rd-furn-msg">' +   // 안내만 짧게 (가구 이름·'벽에 붙어요'는 뺌 — 2026-10-30)
+        (def.fin && hasWalls() ? '마감할 벽의 방 쪽 가까이를 누르세요' : '도면에서 놓을 곳을 누르세요') + '</span>' +
+        '<button type="button" class="rd-wbtn" data-faddx aria-label="놓기 취소">' + I.close + '<span>취소</span></button></div>';   // 놓기 그만 (2026-10-30)
       else if (cur) {   // 고른 가구: 늘 같은 모양 — 이름 · 돌리기 · 크기 · 빼기 (옮기기·돌리기·크기는 도면에서 바로 끌어도 됨)
-        var nm = def.name, ht = def.ht == null ? '천장' : String(def.ht), idx = def.multi && keysOf(def.key).length > 1 ? ' ' + (keysOf(def.key).indexOf(st.furn) + 1) : '';
+        var nm = def.name, ht = def.ht == null ? '천장' : toMM(def.ht), idx = keysOf(def.key).length > 1 ? ' ' + (keysOf(def.key).indexOf(st.furn) + 1) : '';
         var size = def.line ? (hasWalls() ? numIn('data-fl', '길이', cur.L * d.walls.m, '', nm) : '') + numIn('data-fh', '높이', cur.h, '천장', nm)
           : def.nodir ? numIn('data-fw', '크기', cur.w, '', nm) + numIn('data-fh', '높이', cur.h, ht, nm)
             : def.mount ? numIn('data-fw', '크기', cur.w, '', nm) + numIn('data-fh', '거는 높이', cur.h, ht, nm)
-            : numIn('data-fw', '가로', cur.w, '', nm) + numIn('data-fdp', '깊이', cur.dp, String(def.d), nm) + numIn('data-fh', '높이', cur.h, ht, nm);
-        box = '<div class="rd-cam-tip rd-furn-tip" role="group" aria-label="' + esc(nm) + ' 고치기"><div class="rd-furn-hd"><span class="rd-furn-msg"><b>' + esc(nm + idx) + '</b> · 도면에서 끌어서 ' +
-          (def.line ? '옮기고 양 끝 동그라미로 늘려요' : def.nodir ? '옮겨요' : '옮기고 동그라미로 돌려요') + '</span>' +
-          '<button type="button" class="rd-cam-clear rd-furn-x" data-furnclear>빼기</button></div>' +
-          '<div class="rd-furn-row">' + (def.nodir || def.fin ? '' : '<button type="button" class="rd-wbtn" data-frot="-90" aria-label="왼쪽으로 90도 돌리기">' + ROT_L + '<span>90°</span></button>' +
-            '<button type="button" class="rd-wbtn" data-frot="90" aria-label="오른쪽으로 90도 돌리기">' + ROT_R + '<span>90°</span></button>') +
-          (def.fin ? '<button type="button" class="rd-wbtn" data-fflip aria-label="벽의 반대쪽 면으로 옮기기">반대쪽 면</button>' : '') + size + '</div></div>';
+            : numIn('data-fw', '가로', cur.w, '', nm) + numIn('data-fdp', '깊이', cur.dp, toMM(def.d), nm) + numIn('data-fh', '높이', cur.h, ht, nm);
+        // 고른 가구 칸: 이름·삭제 / 돌리기 한 줄 / 크기 한 줄 / 맨 아래 작은 안내 (2026-10-30 줄 나눔)
+        var rb = function (a) { return '<button type="button" class="rd-wbtn" data-frot="' + a + '" aria-label="' + (a < 0 ? '왼쪽' : '오른쪽') + '으로 ' + Math.abs(a) + '도 돌리기">' + (a < 0 ? ROT_L : ROT_R) + '<span>' + Math.abs(a) + '°</span></button>'; };
+        var rot = def.nodir || def.fin ? '' : rb(-90) + rb(90) + rb(-45) + rb(45);   // ↺90° ↻90° | ↺45° ↻45° (90끼리·45끼리 나란히 — 2026-10-30)
+        if (def.fin) rot = '<button type="button" class="rd-wbtn rd-span2" data-fflip aria-label="벽의 반대쪽 면으로 옮기기">반대쪽 면</button>';
+        box = '<div class="rd-cam-tip rd-furn-tip" role="group" aria-label="' + esc(nm) + ' 고치기"><div class="rd-furn-hd"><b class="rd-furn-name">' + esc(nm + idx) + '</b>' +
+          '<button type="button" class="rd-cam-clear rd-furn-x rd-del" data-furnclear title="삭제 (PC는 Delete 키)">' + I.trash + '<span>삭제</span></button></div>' +
+          (rot ? '<div class="rd-furn-grid' + (def.fin ? '' : ' rd-furn-rot') + '">' + rot + '</div>' : '') +
+          '<div class="rd-furn-grid rd-furn-size">' + size + '</div>' +
+          '<div class="rd-furn-foot"><p class="rd-furn-hint">도면에서 끌어서 ' + (def.line ? '옮기고 양 끝 동그라미로 늘려요' : def.nodir ? '옮겨요' : '옮기고 동그라미로 돌려요') + '</p>' +
+          // 자석 (2026-10-30): 끌어 옮길 때 벽 선 가까이(20cm 안) 가면 벽에 착 붙음 — 끄고 켤 수 있음 (가벽·벽 마감·샹들리에는 해당 없음)
+          '<label class="rd-mag' + (magOk(def) ? '' : ' off') + '"><input type="checkbox" data-fmag' + (st.mag ? ' checked' : '') + (magOk(def) ? '' : ' disabled') + '><span>자석</span><span class="switch" aria-hidden="true"></span></label></div></div>';
       }
       var selKind = cur ? def.key : st.add;
       if (!st.ftab) st.ftab = cur || st.add ? def.g : RP.FURN_GROUPS[0].g;
@@ -371,24 +567,43 @@
         var n = RP.furnKeys(d.furn).filter(function (k) { return RP.furnDef(k).g === g.g; }).length, on = g.g === gr.g;
         return '<button type="button" role="tab" class="fd-tab' + (on ? ' on' : '') + '" aria-selected="' + on + '" id="rd-ftab-' + g.g + '" data-ftab="' + g.g + '">' + esc(g.name) + (n ? '<small>' + n + '</small>' : '') + '</button>';
       }).join('') + '</div>';
-      return '<div class="rd-cam rd-furn"><span class="rd-cam-l" id="rd-furn-l">가구·구조 위치 <span class="opt">(선택)</span></span>' + tabs +
+      return '<div class="rd-cam rd-furn">' + secHd('rd-furn-l', '가구·구조 위치', '<button type="button" class="rd-cam-clear rd-del rd-reset" data-furnreset' + (RP.furnKeys(d.furn).length ? '' : ' disabled') + '>' + RESET + '<span>초기화</span></button>') + tabs +
         '<div class="rd-cam-chips rd-furn-chips" role="tabpanel" aria-labelledby="rd-ftab-' + gr.g + '">' + RP.FURN.filter(function (f) { return f.g === gr.g; }).map(function (f) {
           var on = selKind === f.key, n = keysOf(f.key).length;
-          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (n ? ' set' : '') + '" data-furn="' + esc(f.key) + '" aria-pressed="' + on + '">' + (n ? I.check : '') + '<span>' + esc(f.name) + (n > 1 ? ' ' + n : '') + '</span></button>';
+          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + (n ? ' set' : '') + '" data-furn="' + esc(f.key) + '" aria-pressed="' + on + '" aria-label="' + esc(f.name) + (n ? ' (' + n + '개 놓음)' : '') + '"><span>' + esc(f.name) + '</span>' + (n > 1 ? '<small class="rd-fn">' + n + '</small>' : '') + '</button>';   // 놓은 가구는 색칠 (체크 표시 대신), 두 개 이상이면 개수
         }).join('') + '</div>' + box + '</div>';
     }
     // 새로 놓기: 한 번 누르면 바로 놓이고 골라짐. 벽 선이 있으면 가까운 벽(1.2m 안)에 등을 붙이고 방 쪽을 보게
-    function snapToWall(x, y, def) {
+    function snapToWall(x, y, def, sz) {
+      sz = sz || { w: def.w, d: def.d };
       var w = d.walls, ar = w.ar, m = w.m, best = null;
       w.s.forEach(function (g) {
         if (g[4] === 'o') return;
         var n = RW.nearSeg(x, y, g, ar);
-        if (n.d * m < 1.2 && (!best || n.d < best.n.d)) best = { n: n, g: g };
+        if (!best || n.d < best.n.d) best = { n: n, g: g };   // 가장 가까운 벽 (멀어도 — 앞쪽 방향을 정하려고)
       });
       if (!best) return null;
       var g = best.g, sx = g[2] - g[0], sy = (g[3] - g[1]) * ar, sl = Math.hypot(sx, sy) || 1, ux = -sy / sl, uy = sx / sl;   // 벽에 직각
       var vx = x - best.n.x, vy = (y - best.n.y) * ar; if (ux * vx + uy * vy < 0) { ux = -ux; uy = -uy; }   // 누른 쪽(방 쪽)으로
-      var off = (0.075 + def.d / 2) / m, cx = best.n.x + ux * off, cy = (best.n.y * ar + uy * off) / ar;
+      if (best.n.d * m >= 1.2) return { tx: cl01(x + ux * 0.05), ty: cl01(y + uy * 0.05 / ar) };   // 벽이 멀면(1.2m 넘게) 자리는 누른 곳 그대로, 앞쪽만 가까운 벽의 반대쪽 (2026-10-30)
+      var px = best.n.x, py = best.n.y * ar;   // 벽 위 자리 (가로는 ar을 곱한 단위)
+      if (!def.mount) {   // 모서리 맞추기 (2026-10-30): 옆 벽이 가까우면(가구 옆면과 0.6m 안) 옆면을 그 벽에 붙임 — 벽시계·벽조명은 그대로
+        var ax = sx / sl, ay = sy / sl, half = 0.075 / m, hw = sz.w / 2 / m, th = 0.15 / m, L = -Infinity, R = Infinity;
+        w.s.forEach(function (h) {
+          if (h === g || h[4] === 'o') return;
+          var loc = function (qx, qy) { var vx2 = qx - px, vy2 = qy * ar - py; return [vx2 * ax + vy2 * ay, vx2 * ux + vy2 * uy]; };
+          var P1 = loc(h[0], h[1]), P2 = loc(h[2], h[3]);
+          if (Math.max(P1[1], P2[1]) < th || Math.min(P1[1], P2[1]) > th || Math.abs(P2[1] - P1[1]) < 1e-9) return;   // 방 쪽으로 뻗어 이 벽 선에 닿는 벽만
+          var sc = P1[0] + (P2[0] - P1[0]) * (0 - P1[1]) / (P2[1] - P1[1]);   // 그 벽이 벽 선과 만나는 곳 (누른 자리에서 벽을 따라 잰 거리)
+          if (sc < 0) { if (sc > L) L = sc; } else if (sc < R) R = sc;
+        });
+        var gl = -hw - half - L, gr = R - half - hw, lim = 0.6 / m, sh = 0;   // 양옆 벽까지 남는 틈
+        if (R - L < 2 * (hw + half)) sh = (L + R) / 2;   // 자리가 가구보다 좁으면 가운데
+        else if (gl <= gr && gl < lim) sh = L + half + hw;   // 왼쪽 모서리
+        else if (gr < lim) sh = R - half - hw;   // 오른쪽 모서리
+        if (isFinite(sh)) { px += ax * sh; py += ay * sh; }
+      }
+      var off = (0.075 + sz.d / 2) / m, cx = px + ux * off, cy = (py + uy * off) / ar;
       return { x: cl01(cx), y: cl01(cy), tx: cl01(cx + ux * 0.05), ty: cl01(cy + uy * 0.05 / ar) };
     }
     // 벽 마감 자리: 가까운 벽(1.2m 안)의 누른 쪽 면. 그 벽에 다른 벽이 만나는 곳(방 쪽으로 뻗은 벽)까지만 — 거실 벽을 누르면 거실 안 길이만큼
@@ -415,15 +630,16 @@
       return { x: cl01(mx), y: cl01(my / ar), tx: cl01(mx + vx * half), ty: cl01((my + vy * half) / ar), L: Math.round(half * 2 * 1e4) / 1e4 };
     }
     function placeNew(kind, x, y, ar) {
-      var def = RP.furnDef(kind), key = def.multi ? nextKey(kind) : kind; if (!key) return;
-      var m = hasWalls() ? d.walls.m : 0, c = { x: x, y: y, ar: ar, w: def.w };
+      var def = RP.furnDef(kind), key = nextKey(kind); if (!key) return;   // 모든 가구 여러 개 (소파·소파 2 …)
+      var sz = sizeOf(def), m = hasWalls() ? d.walls.m : 0, c = { x: x, y: y, ar: ar, w: sz.w };   // 처음 크기: 설정의 가구 크기(없으면 기본)
+      if (sz.cd) c.dp = sz.cd; if (sz.h) c.h = sz.h;
       var fl = def.fin && m ? finLine(x, y) : null;
       if (fl) Object.assign(c, fl);   // 벽 마감: 누른 쪽 벽면, 그 방 안의 길이만큼
       else if (def.line) { var half = (m ? 1.5 / m : 0.1) / 2; c.tx = cl01(x + half); c.ty = y; c.L = half * 2; }   // 가벽: 가로로 1.5m (양 끝을 끌어 고침)
       else if (def.axis) { c.tx = cl01(x + 0.05); c.ty = y; }   // 식탁·낮은 테이블: 긴 쪽이 가로
       else if (!def.nodir) {
-        var sn = m ? snapToWall(x, y, def) : null;
-        if (sn) Object.assign(c, sn); else { c.tx = x; c.ty = cl01(y + 0.05 / ar); }   // 벽이 없으면 앞쪽이 아래
+        var sn = m ? snapToWall(x, y, def, sz) : null;
+        if (sn) Object.assign(c, sn); else { c.tx = x; c.ty = cl01(y + 0.05 / ar); }   // 벽 가까이면 벽에 붙임, 멀면 앞쪽만 가까운 벽 반대 · 벽 선이 없으면 앞쪽이 아래
       }
       var nf = {}; nf[key] = c;
       d.furn = RP.furnOf(Object.assign({}, d.furn, nf)); st.furn = d.furn[key] ? key : ''; st.add = ''; st.gcache = {};
@@ -466,7 +682,9 @@
         var rx = -fy, ry = fx, hw, hd;
         if (m) { hw = c.w / m * W / 2; hd = (f.nodir ? c.w : c.dp || f.d) / m * W / 2; } else { hw = f.nodir ? 6 * R : 10 * R; hd = 6 * R; }
         var P = function (a, b2) { return (X + rx * a + fx * b2).toFixed(1) + ',' + (Y + ry * a + fy * b2).toFixed(1); };
-        var front = f.axis || f.nodir ? '' : '<line class="rd-fu-front" x1="' + P(-hw, hd).replace(',', '" y1="') + '" x2="' + P(hw, hd).replace(',', '" y2="') + '" stroke-width="' + (3.5 * R) + '"/>';
+        // 앞쪽 굵은 선: 네모 바깥 테두리 안에 딱 맞게 (끝이 둥글게 삐져나오지 않게 — 2026-10-30)
+        var fb = hd - (3.5 - 1.8) / 2 * R, fa = hw + 0.9 * R;
+        var front = f.axis || f.nodir ? '' : '<line class="rd-fu-front" x1="' + P(-fa, fb).replace(',', '" y1="') + '" x2="' + P(fa, fb).replace(',', '" y2="') + '" stroke-width="' + (3.5 * R) + '"/>';
         var ax = f.axis ? rx : fx, ay = f.axis ? ry : fy, al = Math.max((f.axis ? hw : hd) + 12 * R, 22 * R);   // 앞쪽 화살표 (식탁은 긴 쪽 방향)
         var arrow = c.tx != null ? '<line class="rd-fu-arr" x1="' + X.toFixed(1) + '" y1="' + Y.toFixed(1) + '" x2="' + (X + ax * al).toFixed(1) + '" y2="' + (Y + ay * al).toFixed(1) + '" stroke-width="' + (2.2 * R) + '" marker-end="url(#rd-fah)"/>' : '';
         // 고른 가구: 동그라미(돌리기) · 네모(가로·깊이 — 벽 선이 있어 실제 크기를 알 때)
@@ -507,9 +725,8 @@
       return x;
     }
     /* ----- 현재 집 사진 (참고용, 6장까지) — 공간을 고르면 그 공간 그림에 같이 보냄 ----- */
-    var REF_VIEWS = [{ v: '', t: '공간 모름' }].concat(RP.VIEWS.filter(function (v) { return v.key !== 'overview'; }).map(function (v) { return { v: v.key, t: v.name }; }));
     function refsCard() {
-      var rs = d.refs;
+      var rs = d.refs, REF_VIEWS = [{ v: '', t: '공간 모름' }].concat(allViews().filter(function (k) { return k !== 'overview'; }).map(function (k) { return { v: k, t: viewName(k) }; }));
       return '<div class="txt-card est-card rd-refs" id="rd-refs-card"><span class="label ct-label">현재 집 사진 <span class="opt">(선택)</span></span>' +
         (rs.length ? '<div class="rd-ref-list">' + rs.map(function (r, i) {
           var u = st.urls[r.path];
@@ -537,15 +754,37 @@
       chain.then(function () { return persist(true); }).catch(function (err) { oops('사진을 저장하지 못했어요', err); })
         .then(function () { st.refBusy = false; drawRefs(); if (bad) oops('올리지 못한 사진이 있어요', new Error(bad + '장을 올리지 못했어요. 사진(JPG·PNG)인지 확인해 주세요.')); });
     }
-    function drawPlan() { var el = $('#rd-plan-card', page); if (!el) return; el.outerHTML = planCard(); drawCams(); drawWalls(); }
-    /* ----- 도면 확대·축소 (＋ − 단추, 두 손가락 벌리기·오므리기, Ctrl+휠) — 확대하면 도면 칸 안에서 밀어서 봄 ----- */
-    var ZOOMS = [1, 1.5, 2, 3, 4], ZMAX = 4;
+    // 도면 칸 다시 그리기 — 보던 자리(전체화면의 칸 스크롤)를 그대로 (2026-10-30: 켜고 끌 때마다 맨 위로 올라가던 것 고침)
+    function drawPlan() {
+      var el = $('#rd-plan-card', page); if (!el) return;
+      var rows = $('.rd-plan-rows', el), s1 = el.scrollTop, s2 = rows ? rows.scrollTop : 0, wy = window.scrollY;
+      el.outerHTML = planCard();
+      var n = $('#rd-plan-card', page);
+      if (n) { if (s1) n.scrollTop = s1; var r2 = $('.rd-plan-rows', n); if (r2 && s2) r2.scrollTop = s2; }
+      if (Math.abs(window.scrollY - wy) > 1) window.scrollTo(window.scrollX, wy);
+      drawCams(); drawWalls();
+    }
+    /* ----- 도면 확대·축소 (＋ − 단추 25%씩, 마우스 휠, 두 손가락 벌리기·오므리기) — 확대하면 도면 칸 안에서 밀어서 봄 ----- */
+    var ZMAX = 6, ZSTEP = 1.25;
     var MINUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>';
     var PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+    var FULL_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></svg>';   // 창 밖으로 나가는 화살표 (전체 화면)
+    var FULL_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';   // 돌아가는 화살표 (원래 화면으로)
+    // 도면 제목 바로 옆: 전체 화면 / 원래 화면으로 (전체화면에서는 크게)
+    function fullBtn() {
+      return st.full ? '<button type="button" class="btn btn-primary rd-full-btn on" data-pfull aria-pressed="true">' + FULL_OFF + '<span>원래 화면으로</span></button>'
+        : '<button type="button" class="rd-wbtn rd-full-btn" data-pfull aria-pressed="false">' + FULL_ON + '<span>전체 화면</span></button>';
+    }
     function zoomBtns() {
       var z = st.zoom || 1;
       return '<div class="rd-zoom" role="group" aria-label="도면 크기"><button type="button" data-pzoom="-1" aria-label="도면 작게 보기"' + (z <= 1 ? ' disabled' : '') + '>' + MINUS + '</button>' +
+        '<button type="button" class="rd-zoom-v" data-pzoom="0" aria-label="도면 원래 크기로"' + (z <= 1 ? ' disabled' : '') + '>' + zoomPct(z) + '</button>' +   // 배율 (누르면 100%로)
         '<button type="button" data-pzoom="1" aria-label="도면 크게 보기"' + (z >= ZMAX ? ' disabled' : '') + '>' + PLUS + '</button></div>';
+    }
+    function zoomPct(z) { return Math.round(z * 100 / 5) * 5 + '%'; }
+    function zoomUi() {   // 단추·배율 글자만 바꿈 (휠·두 손가락으로 바꾸는 동안)
+      var zb = $('.rd-zoom', page), z = st.zoom || 1; if (!zb) return;
+      var bs = zb.querySelectorAll('button'); bs[0].disabled = z <= 1; bs[1].disabled = z <= 1; bs[1].textContent = zoomPct(z); bs[2].disabled = z >= ZMAX;
     }
     function zoomEls() {
       var box = $('.rd-plan-box', page), sc = box && $('.rd-plan-scroll', box), wrap = sc && $('.rd-cam-wrap', sc), img = $('#rd-plan-img', page);
@@ -556,13 +795,32 @@
       var e = zoomEls(); if (!e) return;
       var z = st.zoom || 1;
       e.box.classList.toggle('zoomed', z > 1);
-      if (z <= 1) { e.sc.style.height = ''; e.wrap.style.width = ''; e.img.style.maxHeight = ''; return; }
+      if (z <= 1) { e.sc.style.height = ''; e.wrap.style.width = ''; e.img.style.maxHeight = st.full ? planMaxH() + 'px' : ''; return; }
       if (!e.img.naturalWidth) return;
-      var bw = e.box.clientWidth, maxH = st.wall ? innerHeight * 0.72 : 360, baseH = Math.min(maxH, bw * e.img.naturalHeight / e.img.naturalWidth);
+      var bw = e.box.clientWidth, maxH = planMaxH(), baseH = Math.min(maxH, bw * e.img.naturalHeight / e.img.naturalWidth);
       e.sc.style.height = Math.round(baseH) + 'px';
       e.wrap.style.width = Math.round(bw * z) + 'px';
       e.img.style.maxHeight = Math.round(maxH * z) + 'px';
       if (!e.sc.hasAttribute('data-zr')) { e.sc.setAttribute('data-zr', ''); e.sc.scrollLeft = st.zsx || 0; e.sc.scrollTop = st.zsy || 0; }   // 다시 그려도 보던 곳 그대로
+    }
+    var FULL_SIDE = '(min-width: 900px), (orientation: landscape) and (min-width: 700px)';   // 전체화면에서 칸을 도면 옆에 두는 화면 (admin.css와 같게)
+    // 도면 그림의 가장 큰 높이 (전체화면: 칸이 옆에 있으면 제목 줄 아래 화면 높이 다, 아래에 있으면 50% — 아래 칸이 보이게)
+    function planMaxH() {
+      if (st.full) {
+        if (!matchMedia(FULL_SIDE).matches) return Math.max(200, Math.round(innerHeight * 0.5));
+        var b = $('.rd-plan-box', page), top = b ? b.getBoundingClientRect().top : 80;   // 제목 줄 아래부터 화면 끝까지
+        return Math.max(200, Math.round(innerHeight - top - 20));
+      }
+      return st.wall ? innerHeight * 0.72 : 360;
+    }
+    // 전체화면 켜고 끄기 (확대해서 보던 곳은 그대로)
+    function setFull(on) {
+      var e = zoomEls(), fx = 0.5, fy = 0.5;
+      if (e && (st.zoom || 1) > 1) { fx = (e.sc.scrollLeft + e.sc.clientWidth / 2) / (e.sc.scrollWidth || 1); fy = (e.sc.scrollTop + e.sc.clientHeight / 2) / (e.sc.scrollHeight || 1); }
+      st.full = !!on; drawPlan();
+      e = zoomEls();
+      if (e && (st.zoom || 1) > 1) { e.sc.scrollLeft = fx * e.sc.scrollWidth - e.sc.clientWidth / 2; e.sc.scrollTop = fy * e.sc.scrollHeight - e.sc.clientHeight / 2; st.zsx = e.sc.scrollLeft; st.zsy = e.sc.scrollTop; }
+      var b = $('[data-pfull]', page); if (b) b.focus({ preventScroll: true });
     }
     // z배로 (cx, cy: 화면에서 그 자리를 그대로 두고 키울 점 — 없으면 가운데)
     function setZoom(z, cx, cy, live) {
@@ -574,12 +832,16 @@
       e.sc.scrollLeft = px * z - (cx - r.left); e.sc.scrollTop = py * z - (cy - r.top);
       st.zsx = e.sc.scrollLeft; st.zsy = e.sc.scrollTop;
       drawCams(); drawWalls();
-      if (!live) { var zb = $('.rd-zoom', e.box); if (zb) zb.outerHTML = zoomBtns(); }
+      zoomUi();
     }
     page.addEventListener('scroll', function (e) { var t = e.target; if (t.classList && t.classList.contains('rd-plan-scroll')) { st.zsx = t.scrollLeft; st.zsy = t.scrollTop; } }, true);
-    page.addEventListener('wheel', function (e) {   // Ctrl(또는 ⌘)+휠 · 노트북 터치패드 벌리기
-      if (!(e.ctrlKey || e.metaKey) || !e.target.closest || !e.target.closest('.rd-plan-scroll')) return;
-      e.preventDefault(); setZoom((st.zoom || 1) * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    page.addEventListener('wheel', function (e) {   // 도면 위에서 마우스 휠: 위로 굴리면 크게, 아래로 작게 (터치패드 벌리기·Ctrl+휠도) — 더 키우거나 줄일 수 없으면 화면이 그대로 내려감
+      if (!e.target.closest || !e.target.closest('.rd-plan-scroll')) return;
+      var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1), z0 = st.zoom || 1;
+      var z = Math.max(1, Math.min(ZMAX, z0 * Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015))));
+      if (z < 1.02) z = 1;
+      if (Math.abs(z - z0) < 0.001) return;
+      e.preventDefault(); setZoom(z, e.clientX, e.clientY);
     }, { passive: false });
     page.addEventListener('touchstart', function (e) {   // 두 손가락: 벌리면 크게, 오므리면 작게, 같이 밀면 옮겨 봄
       if (e.touches.length !== 2) return;
@@ -621,7 +883,7 @@
     page.addEventListener('pointerup', function () { var g = st.pan; if (!g) return; st.pan = null; if (g.moved) st.pjust = Date.now(); });
     function onResize() {
       if (!page.isConnected) { removeEventListener('resize', onResize); return; }
-      if ((st.zoom || 1) > 1) { drawCams(); drawWalls(); }
+      if ((st.zoom || 1) > 1 || st.full) { drawCams(); drawWalls(); }
     }
     addEventListener('resize', onResize);
     function camTap(e) {
@@ -632,10 +894,11 @@
       var ar = img.naturalHeight / img.naturalWidth;   // 도면 세로/가로 — 바라보는 방위를 정확히 재려고
       if (st.add) return placeNew(st.add, x, y, ar);   // 가구 새로 놓기 (한 번에)
       if (!st.cam) { if (st.furn) { st.furn = ''; drawPlan(); } return; }   // 가구를 고른 채로 빈 곳을 누름 → 고르기 끝
+      st.camNear = false;
       if (st.camStep !== 'dir') { d.cams[st.cam] = RP.camOf({ x: x, y: y, ar: ar }); st.camStep = 'dir'; }
       else {
         var c = RP.camOf({ x: d.cams[st.cam].x, y: d.cams[st.cam].y, tx: x, ty: y, ar: ar });
-        if (c.tx == null) return;   // 서 있는 곳과 너무 가까우면 다시
+        if (c.tx == null) { if (!st.camNear) { st.camNear = true; drawPlan(); } return; }   // 서 있는 곳과 너무 가까우면 다시 (알려 줌)
         d.cams[st.cam] = c; st.cam = ''; st.camStep = '';
       }
       persist(); drawPlan();
@@ -661,7 +924,7 @@
             var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage(im, 0, 0);
             var X = c.x * W, Y = c.y * H, RED = '#E0201C';
             if (c.tx != null) {
-              var a = Math.atan2(c.ty * H - Y, c.tx * W - X), L = Math.max(Math.hypot(c.tx * W - X, c.ty * H - Y), 0.12 * M), R = Math.max(L * 1.15, 0.18 * M), h = ((RW ? RW.FOV : 70) / 2) * Math.PI / 180;   // 밑그림 시야각과 같게
+              var a = Math.atan2(c.ty * H - Y, c.tx * W - X), L = Math.max(Math.hypot(c.tx * W - X, c.ty * H - Y), 0.12 * M), R = Math.max(L * 1.15, 0.18 * M), h = ((c.fov || d.fov) / 2) * Math.PI / 180;   // 밑그림 시야각과 같게
               x.beginPath(); x.moveTo(X, Y); x.arc(X, Y, R, a - h, a + h); x.closePath();
               x.fillStyle = 'rgba(224,32,28,0.16)'; x.fill(); x.lineWidth = 0.25 * U; x.strokeStyle = 'rgba(224,32,28,0.55)'; x.stroke();
               var ex = X + Math.cos(a) * L, ey = Y + Math.sin(a) * L, hd = 2.4 * U;
@@ -681,39 +944,46 @@
     function wallSum(w) {
       var n = { w: 0, d: 0, n: 0, g: 0 }; w.s.forEach(function (g) { n[g[4] === 'o' ? 'd' : g[4]]++; });
       var x0 = 1, x1 = 0, y0 = 1, y1 = 0; w.s.forEach(function (g) { x0 = Math.min(x0, g[0], g[2]); x1 = Math.max(x1, g[0], g[2]); y0 = Math.min(y0, g[1], g[3]); y1 = Math.max(y1, g[1], g[3]); });
-      var size = x1 > x0 ? ' · 약 ' + ((x1 - x0) * w.m).toFixed(1) + '×' + ((y1 - y0) * w.ar * w.m).toFixed(1) + 'm' : '';
+      var size = x1 > x0 ? ' · 약 ' + ((x1 - x0) * w.m).toFixed(1) + '×' + ((y1 - y0) * w.ar * w.m).toFixed(1) + 'm' : '';   // 집 전체 크기는 m (2026-10-30 — 이것만 미터)
       return '벽 ' + n.w + ' · 문 ' + n.d + ' · 반창 ' + n.n + ' · 전체창 ' + n.g + size + ' (' + SRC_TXT[w.src] + ')';
     }
     function wallRow() {
       if (!RW || !p.plan_path || !st.urls[p.plan_path]) return '';
       if (st.wall && d.walls) return wallEditor();
-      var head = '<span class="rd-cam-l">3D 밑그림 <span class="opt">(선택)</span></span>';
+      var head = secHd('rd-wall-l', '3D 밑그림');   // 제목 줄 높이를 다른 칸과 같게
       var body = st.wbusy ? '<div class="rd-wall-busy" role="status"><span class="rd-spin" aria-hidden="true"></span><span>도면에서 벽을 따는 중… (30초쯤)</span></div>'
         : !d.walls || !d.walls.s.length ? '<div class="rd-wall-btns"><button type="button" class="btn btn-outline btn-sm" data-wauto>도면에서 벽 따기</button><button type="button" class="btn btn-outline btn-sm" data-wdraw>직접 그리기</button></div>'
           : '<p class="rd-wall-sum">' + esc(wallSum(d.walls)) + '</p><div class="rd-wall-btns"><button type="button" class="btn btn-outline btn-sm" data-wedit>벽 고치기</button>' +
-            '<button type="button" class="btn btn-outline btn-sm" data-wauto>다시 따기</button><button type="button" class="btn btn-outline btn-sm rd-wall-x" data-wclear>' + I.trash + '<span>지우기</span></button></div>';
+            '<button type="button" class="btn btn-outline btn-sm" data-wauto>다시 따기</button><button type="button" class="btn btn-outline btn-sm rd-wall-x" data-wclear>' + I.trash + '<span>삭제</span></button></div>';
       return '<div class="rd-wall" id="rd-wall-row">' + head + body + '</div>';
     }
+    var HAND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11V4.5a1.5 1.5 0 0 1 3 0V10"/><path d="M12 9.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 10.5a1.5 1.5 0 0 1 3 0V12"/><path d="M18 11.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1.5a6 6 0 0 1-4.6-2.2L4.3 16.4a1.6 1.6 0 0 1 2.4-2.1L9 16.5V11"/></svg>';   // 손 (벽 수정)
+    var PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="M14.5 5.5l3 3"/></svg>';   // 연필 (벽 생성)
     function wallEditor() {
       var w = d.walls, sel = w.s[st.wsel], cur = sel ? sel[4] : st.wkind, kn = RW.KIND[st.wkind].name;
-      var tip = st.wtool === 'draw' ? (st.wa ? '끝점을 누르세요' : '<b>' + esc(kn) + '</b> 선의 시작점을 누르세요' + (st.wkind !== 'w' ? ' · 벽 위에 그으면 그 부분이 ' + esc(kn) + '으로 바뀌어요' : ''))
-        : sel ? '' : '선을 누르면 고를 수 있어요 · 고른 선은 끝점을 끌어 옮겨요';
-      var tool = function (k, t) { var on = st.wtool === k; return '<button type="button" class="rd-wt' + (on ? ' on' : '') + '" data-wtool="' + k + '" aria-pressed="' + on + '">' + t + '</button>'; };
-      return '<div class="rd-wall rd-wall-ed" id="rd-wall-row">' +
-        '<div class="rd-wall-top"><span class="rd-cam-l">벽 고치기</span><button type="button" class="btn btn-primary btn-sm rd-wall-done" data-wdone>다 했어요</button></div>' +
-        '<div class="rd-wall-tools"><div class="rd-seg" role="group" aria-label="고르기·선 긋기">' + tool('pick', '고르기') + tool('draw', '선 긋기') + '</div>' +
-          '<button type="button" class="rd-wbtn" data-wundo' + (st.wh.length ? '' : ' disabled') + '>' + UNDO + '<span>되돌리기</span></button></div>' +
+      var rc = matchMedia('(hover: hover) and (pointer: fine)').matches ? ' · 마우스 오른쪽 단추로 그만' : '';   // 마우스가 있는 컴퓨터에서만 알려 줌
+      var tip = st.wtool === 'draw' ? (st.wa ? '끝점을 누르세요' + rc : '<b>' + esc(kn) + '</b> 선의 시작점을 누르세요' + (st.wkind !== 'w' ? ' · 벽 위에 그으면 그 부분이 ' + esc(kn) + '으로 바뀌어요' : ''))
+        : sel ? (w.src === 'size' || w.src === 'guess' ? '지금 크기는 어림값이에요 · 고른 선의 실제 길이를 넣으면 도면 전체 크기가 맞춰져요' : '고른 선은 끝점을 끌어 옮기고, 위 종류 단추로 바꿀 수 있어요')
+        : '선을 누르면 고를 수 있어요 · 고른 선은 끝점을 끌어 옮겨요';   // 안내는 늘 보임 (상자 밖 아래 — 글 길이가 바뀌어도 상자 높이는 그대로)
+      var tool = function (k, t, ic) { var on = st.wtool === k; return '<button type="button" class="rd-wt' + (on ? ' on' : '') + '" data-wtool="' + k + '" aria-pressed="' + on + '">' + ic + '<span>' + t + '</span></button>'; };
+      return '<div class="rd-wall-wrap" id="rd-wall-row"><div class="rd-wall rd-wall-ed">' +
+        '<div class="rd-wall-top"><span class="rd-cam-l">벽 고치기</span></div>' +
+        '<div class="rd-wall-acts">' +   // 되돌리기 · 삭제(고른 선) · 저장 — 보통은 제목 줄 오른쪽에 작게, 전체화면에서는 칸 맨 아래 (2026-10-30)
+          '<button type="button" class="rd-wbtn" data-wundo' + (st.wh.length ? '' : ' disabled') + '>' + UNDO + '<span>되돌리기</span></button>' +
+          '<button type="button" class="rd-wbtn" data-wquit aria-label="고친 것 취소">' + I.close + '<span>취소</span></button>' +   // 취소: 벽 고치기 전으로 (2026-10-30)
+          '<button type="button" class="btn btn-primary btn-sm rd-wall-done" data-wdone>저장</button></div>' +
+        '<div class="rd-wall-tools"><div class="rd-seg" role="group" aria-label="벽 수정·벽 생성">' + tool('pick', '벽 수정', HAND) + tool('draw', '벽 생성', PENCIL) + '</div></div>' +   // 손 = 골라서 고치기, 연필 = 새로 긋기 (2026-10-30 이름 바꿈)
         '<div class="rd-wkinds" role="group" aria-label="선 종류">' + RW.KINDS.map(function (k) {
-          var on = cur === k.k;
-          return '<button type="button" class="rd-wk' + (on ? ' on' : '') + '" data-wk="' + k.k + '" aria-pressed="' + on + '"><i class="k-' + k.k + '" aria-hidden="true"></i><span>' + esc(k.name) + '</span></button>';
+          var off = st.wtool === 'pick' && !sel, on = !off && cur === k.k;   // 벽 수정에서 고른 선이 없으면 종류 단추는 흐리게 (눌러도 벽 생성으로 넘어가지 않게 — 2026-10-30)
+          return '<button type="button" class="rd-wk' + (on ? ' on' : '') + '" data-wk="' + k.k + '" aria-pressed="' + on + '"' + (off ? ' disabled' : '') + '><i class="k-' + k.k + '" aria-hidden="true"></i><span>' + esc(k.name) + '</span></button>';
         }).join('') + '</div>' +
-        (tip ? '<div class="rd-cam-tip rd-wall-tip" role="status"><span>' + tip + '</span>' + (st.wa ? '<button type="button" class="rd-cam-clear" data-wcancel>그만</button>' : '') + '</div>' : '') +
-        (sel ? '<div class="rd-wsel"><span class="rd-wsel-k"><i class="k-' + sel[4] + '" aria-hidden="true"></i>고른 ' + esc(RW.KIND[sel[4]].name) + '</span>' +
-          '<label class="rd-wnum">길이<input class="input" data-wlen inputmode="decimal" maxlength="6" value="' + RW.metres(sel, w).toFixed(2) + '" aria-label="고른 선의 실제 길이(미터)"><span>m</span></label>' +
-          '<button type="button" class="rd-wbtn rd-wdel" data-wdel>' + I.trash + '<span>지우기</span></button></div>' +
-          (w.src === 'size' || w.src === 'guess' ? '<p class="rd-wnote">크기가 어림값이에요 · 고른 선의 실제 길이를 넣으면 맞춰져요</p>' : '') : '') +
-        '<label class="rd-wnum rd-wceil">천장 높이<input class="input" data-wceil inputmode="decimal" maxlength="4" value="' + w.h.toFixed(2) + '"><span>m</span></label>' +
-        '</div>';
+        // 고른 선 줄: 늘 있음 (고른 선이 없으면 흐리게 — 선을 고르고 풀 때 상자 높이가 바뀌지 않게)
+        '<div class="rd-wsel' + (sel ? '' : ' off') + '"><span class="rd-wsel-k"><i class="k-' + (sel ? sel[4] : 'none') + '" aria-hidden="true"></i>' + '<span class="rd-wsel-p">고른</span> <b>' + (sel ? esc(RW.KIND[sel[4]].name) : '선') + '</b></span>' +   // '고른'은 보통 글씨, 종류만 굵게
+          '<label class="rd-wnum">길이<input class="input" data-wlen inputmode="numeric" maxlength="6" value="' + (sel ? toMM(RW.metres(sel, w)) : '') + '"' + (sel ? '' : ' disabled placeholder="—"') + ' aria-label="고른 선의 실제 길이(밀리미터)"><span>mm</span>' + mTag(sel ? toMM(RW.metres(sel, w)) : '') + '</label>' +
+          '<span class="rd-wsel-acts"><button type="button" class="rd-wbtn" data-wcancel' + (st.wa ? '' : ' disabled') + ' aria-label="긋던 선 그만">그만</button>' +   // 그만 · 삭제: 고른 선 줄 오른쪽 (2026-10-30)
+          '<button type="button" class="rd-wbtn rd-wdel" data-wdel' + (sel ? '' : ' disabled') + ' aria-label="고른 선 삭제" title="삭제 (PC는 Delete 키)">' + I.trash + '<span>삭제</span></button></span></div>' +
+        '<label class="rd-wnum rd-wceil">천장 높이<input class="input" data-wceil inputmode="numeric" maxlength="4" value="' + toMM(w.h) + '" aria-label="천장 높이(밀리미터)"><span>mm</span>' + mTag(toMM(w.h)) + '</label>' +
+        '</div><p class="rd-wall-tip" role="status"><span>' + tip + '</span></p></div>';
     }
     // 도면 위 벽 선 (카메라 표시와 같은 방식 — 그림 크기 그대로의 viewBox, 굵기는 화면 픽셀 기준)
     function drawWalls() {
@@ -822,9 +1092,9 @@
           var W = (px && px.W) || (img && img.naturalWidth), H = (px && px.H) || (img && img.naturalHeight);
           var w = RW.fromAI(r[0], W, H, { px: px && px.px, size: d.size });
           if (!w || !w.s.length) throw new Error('도면에서 벽을 찾지 못했어요. 직접 그려 주세요.');
-          d.walls = w; st.wh = []; st.wsel = -1; st.wa = null; st.wall = true; st.wtool = 'pick'; st.gcache = {};
+          d.walls = w; st.wh = []; st.wsel = -1; st.wa = null; st.wall = true; st.wtool = 'pick'; st.gcache = {}; st.wOrig = JSON.stringify(w);   // 취소하면 AI가 딴 벽으로
           return persist(true).then(function () {
-            if (r[0] && r[0].partial) return K.ask({ title: '벽을 일부만 땄어요', text: 'AI 답이 길어서 중간에 끊겼어요. 빠진 벽은 <b>선 긋기</b>로 그려 주세요.', cancel: false, ok: '확인' });
+            if (r[0] && r[0].partial) return K.ask({ title: '벽을 일부만 땄어요', text: 'AI 답이 길어서 중간에 끊겼어요. 빠진 벽은 <b>벽 생성</b>으로 그려 주세요.', cancel: false, ok: '확인' });
           });
         }).catch(function (err) { oops('벽을 따지 못했어요', err); })
           .then(function () { st.wbusy = false; if (page.isConnected) drawPlan(); });
@@ -832,9 +1102,20 @@
     }
     function startDraw() {
       var img = $('#rd-plan-img', page); if (!RW || !img || !img.naturalWidth) return;
+      st.wOrig = d.walls ? JSON.stringify(d.walls) : null;   // 취소하면 그리기 전으로
       d.walls = RW.clean({ ar: img.naturalHeight / img.naturalWidth, m: 12, h: RW.CEIL, src: 'guess', s: [] });
       st.wall = true; st.wtool = 'draw'; st.wkind = 'w'; st.wsel = -1; st.wa = null; st.wh = []; st.cam = ''; st.camStep = '';
       drawPlan();
+    }
+    // 취소: 이번에 고친 것을 모두 버리고 벽 고치기 전으로 (고친 게 있으면 한 번 물어봄)
+    function quitWalls() {
+      var now = d.walls ? JSON.stringify(d.walls) : null, orig = st.wOrig === undefined ? now : st.wOrig;
+      var go = now === orig ? Promise.resolve(true) : K.ask({ title: '고친 내용을 버릴까요?', text: '벽 고치기 전으로 돌아가요.', cancel: '계속 고치기', ok: '버리기', okClass: 'btn-danger' });
+      go.then(function (ok) {
+        if (!ok || !page.isConnected) return;
+        d.walls = orig ? RW.clean(JSON.parse(orig)) : null; st.wh = []; st.wOrig = undefined;
+        endWalls();
+      });
     }
     function endWalls() {
       st.wall = false; st.wa = null; st.wsel = -1; st.hover = null; st.drag = null;
@@ -843,9 +1124,9 @@
     }
     // 밑그림 미리보기 (카메라 위치·바라볼 쪽을 찍은 공간마다)
     function guideUrl(k, big) {
-      var c = d.cams[k], key = (big ? 'B' : 's') + k + JSON.stringify(c) + JSON.stringify(d.furn);
+      var c = camFull(k), key = (big ? 'B' : 's') + k + JSON.stringify(c) + JSON.stringify(d.furn);
       if (!big && st.gcache[key]) return st.gcache[key];
-      var r = RW.raster(d.walls, c, big ? { ss: 2, furn: furnList() } : { w: 320, h: 240, furn: furnList() });
+      var vh = RP.vhOf(c.vh), r = RW.raster(d.walls, c, big ? { ss: 2, fov: c.fov, eye: vh.eye, hz: vh.hz, furn: furnList() } : { w: 320, h: 240, fov: c.fov, eye: vh.eye, hz: vh.hz, furn: furnList() });
       if (!r) return '';
       var cv = document.createElement('canvas'); cv.width = r.w; cv.height = r.h;
       cv.getContext('2d').putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
@@ -854,18 +1135,21 @@
       return u;
     }
     function guideRow() {
-      if (!hasWalls() || st.wall) return '';
-      var ks = camKeys().filter(function (k) { return canGuide(d.cams[k]); });
-      if (!ks.length) return camKeys().length ? '<p class="rd-guide-none" id="rd-guide-row">카메라 위치와 바라볼 쪽을 찍은 공간은 밑그림대로 그려요</p>' : '';
-      return '<div class="rd-guides" id="rd-guide-row"><span class="rd-cam-l">밑그림 미리보기</span><div class="rd-guide-list">' + ks.map(function (k) {
+      if (st.wall) return '';
+      // 늘 같은 칸 (2026-10-30 — 찍은 카메라가 없어도 칸은 그대로, 안에 안내). 바라볼 쪽까지 찍은 공간은 밑그림, 서 있을 곳만 찍은 공간은 빈 칸('바라볼 쪽을 찍으면 보여요' — 누르면 그 공간 카메라 찍기로)
+      var ks = hasWalls() ? camKeys().filter(function (k) { return canGuide(d.cams[k]) || d.cams[k]; }) : [];
+      var head = '<div class="rd-guides" id="rd-guide-row"><div class="rd-sec-hd"><span class="rd-cam-l">밑그림 미리보기</span></div>';
+      if (!ks.length) return head + '<p class="rd-sec-empty">' + (!hasWalls() ? '3D 밑그림(벽 선)을 만들면 카메라에서 본 밑그림을 여기서 미리 볼 수 있어요' : '아직 카메라 각도를 정한 공간이 없어요 · 카메라 위치에서 서 있을 곳과 바라볼 쪽을 찍으면 여기에 보여요') + '</p></div>';
+      return head + '<div class="rd-guide-list">' + ks.map(function (k) {
+        if (!canGuide(d.cams[k])) return '<button type="button" class="rd-guide rd-guide-wait" data-cam="' + esc(k) + '"' + (st.cam === k ? ' aria-pressed="true"' : '') + '><span class="rd-guide-ph">바라볼 쪽을<br>찍으면 보여요</span><span>' + viewLabel(k) + '</span></button>';
         var u = guideUrl(k);
-        return '<button type="button" class="rd-guide" data-gzoom="' + esc(k) + '" aria-label="' + esc(viewName(k)) + ' 밑그림 크게 보기">' + (u ? '<img src="' + esc(u) + '" alt="">' : '') + '<span>' + esc(viewName(k)) + '</span></button>';
+        return '<button type="button" class="rd-guide" data-gzoom="' + esc(k) + '" aria-label="' + esc(viewName(k)) + ' 밑그림 크게 보기">' + (u ? '<img src="' + esc(u) + '" alt="">' : '') + '<span>' + viewLabel(k) + '</span></button>';
       }).join('') + '</div></div>';
     }
     // 그림 AI에 보낼 밑그림 (1024×768 JPEG)
     function guideBlob(c) {
       return new Promise(function (ok, no) {
-        var r = RW.raster(d.walls, c, { ss: 2, furn: furnList() }); if (!r) return no(new Error('no guide'));
+        var vh = RP.vhOf(c.vh || d.vh), r = RW.raster(d.walls, c, { ss: 2, fov: c.fov || d.fov, eye: vh.eye, hz: vh.hz, furn: furnList() }); if (!r) return no(new Error('no guide'));
         var cv = document.createElement('canvas'); cv.width = r.w; cv.height = r.h;
         cv.getContext('2d').putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
         cv.toBlob(function (b) { if (b) ok(b); else no(new Error('jpeg')); }, 'image/jpeg', 0.9);
@@ -880,6 +1164,34 @@
       return { f: f, c: c, ar: ar, X: c.x, Y: c.y * ar, fx: fx, fy: fy, rx: -fy, ry: fx };
     }
     var cl01 = function (v) { return Math.max(0, Math.min(1, v)); };
+    // 자석 (2026-10-30): 가구 네모의 네 면 중 벽 선과 나란하고(8° 안) 겹치는 벽이 20cm 안이면 그 벽 면(벽 두께 반 = 7.5cm)에 붙임 — 앞뒤·좌우 따로라 모서리에서는 두 벽에 다 붙음
+    function magnet(key) {
+      var G = fgeo(key), c = G.c, f = G.f, w = d.walls, ar = G.ar, m = w.m;
+      var hw = c.w / 2 / m, hd = (f.nodir ? c.w : (c.dp || f.d)) / 2 / m, half = 0.075 / m, th = 0.2 / m, need = 0.1 / m;
+      var X = c.x, Y = c.y * ar, dX = 0, dY = 0, flip = false;
+      [{ nx: G.fx, ny: G.fy, h: hd, sx: G.rx, sy: G.ry, sh: hw, front: true }, { nx: G.rx, ny: G.ry, h: hw, sx: G.fx, sy: G.fy, sh: hd }].forEach(function (A) {
+        var best = null;
+        [-1, 1].forEach(function (sg) {   // 뒤(-)부터 — 얇은 벽걸이는 벽 앞쪽으로
+          var Nx = A.nx * sg, Ny = A.ny * sg;
+          w.s.forEach(function (gg) {
+            if (gg[4] === 'o') return;
+            var x1 = gg[0], y1 = gg[1] * ar, x2 = gg[2], y2 = gg[3] * ar, L = Math.hypot(x2 - x1, y2 - y1); if (L < 1e-6) return;
+            if (Math.abs(((x2 - x1) * Nx + (y2 - y1) * Ny) / L) > 0.14) return;   // 이 면과 나란한 벽만
+            var dist = ((x1 + x2) / 2 - X - dX) * Nx + ((y1 + y2) / 2 - Y - dY) * Ny, gap = dist - A.h - half;
+            if (Math.abs(gap) > th) return;
+            var a = (x1 - X - dX) * A.sx + (y1 - Y - dY) * A.sy, b = (x2 - X - dX) * A.sx + (y2 - Y - dY) * A.sy;
+            if (Math.min(Math.max(a, b), A.sh) - Math.max(Math.min(a, b), -A.sh) < need) return;   // 이 면과 겹치는 벽만
+            if (!best || Math.abs(gap) < Math.abs(best.gap)) best = { gap: gap, Nx: Nx, Ny: Ny, sg: sg };
+          });
+        });
+        if (best) { dX += best.Nx * best.gap; dY += best.Ny * best.gap; if (A.front && best.sg > 0) flip = true; }
+      });
+      flip = flip && c.tx != null && !f.axis && !f.nodir;   // 앞면이 벽에 붙으려 하면 반대로 뒤집음 — 등이 벽에, 앞은 방 쪽 (2026-10-30, 식탁·낮은 테이블·기둥처럼 앞뒤 없는 것은 그대로)
+      if (!dX && !dY && !flip) return;
+      c.x = cl01(c.x + dX); c.y = cl01(c.y + dY / ar);
+      if (c.tx != null) { c.tx = cl01(c.tx + dX); c.ty = cl01(c.ty + dY / ar); }
+      if (flip) { c.tx = cl01(2 * c.x - c.tx); c.ty = cl01(2 * c.y - c.ty); }   // 네모는 앞뒤가 같은 크기라 자리는 그대로, 방향만 180°
+    }
     page.addEventListener('pointerdown', function (e) {
       if (st.pinch || st.wall || furnPlacing() || st.cam || !e.target.closest) return;
       var el = e.target.closest('[data-fkey]'); if (!el) return;
@@ -901,6 +1213,7 @@
         var mx = pt.x - g.px, my = pt.y - g.py;
         c.x = cl01(s0.x + mx); c.y = cl01(s0.y + my);
         if (s0.tx != null) { c.tx = cl01(s0.tx + mx); c.ty = cl01(s0.ty + my); }
+        if (st.mag && m && magOk(G.f)) magnet(g.key);   // 자석: 벽 가까이 가면 붙음 (모서리면 두 벽 다)
       } else if (g.role === 'rot') {   // 돌리기: 가운데 → 손가락 쪽 (45°에 가까우면 딱 맞춤)
         var vx = pt.x - c.x, vy = (pt.y - c.y) * ar, a = Math.atan2(vy, vx), q = Math.PI / 4, sn = Math.round(a / q) * q;
         if (Math.abs(a - sn) < 0.1) a = sn;
@@ -928,6 +1241,7 @@
     // 끌어 옮기기·누르기 (벽 고치는 중일 때 도면 위)
     page.addEventListener('pointerdown', function (e) {
       if (st.pinch || !st.wall || !d.walls || !e.target.closest || !e.target.closest('#rd-wall-svg')) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;   // 오른쪽 단추는 그만 (아래 contextmenu)
       var pt = planPt(e); if (!pt || pt.out) return;
       e.preventDefault();
       st.ptr = { id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false };
@@ -935,9 +1249,8 @@
       if (st.wtool !== 'pick' || !sel) return;
       var end = [0, 2].filter(function (k) { return Math.hypot(sel[k] - pt.x, (sel[k + 1] - pt.y) * w.ar) * pt.k < 16; })[0];
       if (end == null) return;
-      // 같은 자리에 붙은 다른 선 끝도 같이 옮김
-      var ox = sel[end], oy = sel[end + 1], pts = [];
-      w.s.forEach(function (g, i) { [0, 2].forEach(function (k) { if (Math.abs(g[k] - ox) < 1e-4 && Math.abs(g[k + 1] - oy) < 1e-4) pts.push({ i: i, e: k }); }); });
+      // 고른 선의 끝만 옮김 (같은 점에 모인 다른 선은 그대로 — 2026-10-30 바꿈, 놓을 때 가까운 끝점에 다시 붙음)
+      var pts = [{ i: st.wsel, e: end }];
       st.drag = { pts: pts, anchor: [sel[2 - end], sel[3 - end]], snap: JSON.stringify(w) };
       try { e.target.closest('#rd-wall-svg').setPointerCapture(e.pointerId); } catch (x) {}
     });
@@ -968,9 +1281,23 @@
       var pt = planPt(e); if (pt && !pt.out) wallTap(pt);
     });
     page.addEventListener('pointercancel', function () { if (st.drag) { d.walls = JSON.parse(st.drag.snap); st.drag = null; drawWalls(); } st.ptr = null; });
+    // 벽 그리다가 마우스 오른쪽 단추: 긋던 선 그만 (시작점만 찍었으면 지움) — 시작점이 없으면 벽 생성을 끝내고 벽 수정으로 (2026-10-30)
+    page.addEventListener('contextmenu', function (e) {
+      if (!st.wall || !d.walls || !e.target.closest || !e.target.closest('.rd-plan-box')) return;
+      e.preventDefault();
+      if (st.wa) { st.wa = null; st.hover = null; }
+      else if (st.wtool === 'draw') { st.wtool = 'pick'; st.hover = null; }
+      else if (st.wsel >= 0) st.wsel = -1;
+      refreshWalls();
+    });
     function onKey(e) {
       if (!page.isConnected) { document.removeEventListener('keydown', onKey); return; }
-      if (!st.wall || !d.walls || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) return;
+      if (e.key === 'Escape' && st.full && !document.querySelector('.overlay, .dsel-pop:not([hidden])') && !(st.wall && (st.wa || st.wsel >= 0))) { e.preventDefault(); return setFull(false); }   // Esc: 전체화면 닫기 (벽 고치는 중이면 먼저 고르기를 풂)
+      var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '') || (e.target && e.target.isContentEditable);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !st.wall && !typing && st.furn && d.furn[st.furn] && !st.fdrag && !document.querySelector('.overlay')) {   // 고른 가구: Delete(맥은 delete)로 삭제 (2026-10-30)
+        e.preventDefault(); delete d.furn[st.furn]; st.furn = ''; st.gcache = {}; persist(); return drawPlan();
+      }
+      if (!st.wall || !d.walls || typing) return;
       if (e.key === 'Escape') { if (st.wa) st.wa = null; else st.wsel = -1; st.hover = null; refreshWalls(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && d.walls.s[st.wsel]) { e.preventDefault(); wallSnap(); d.walls.s.splice(st.wsel, 1); st.wsel = -1; wallChanged(); }
       else if ((e.ctrlKey || e.metaKey) && /^z$/i.test(e.key) && st.wh.length) { e.preventDefault(); undoWall(); }
@@ -982,21 +1309,76 @@
       var src = p.plan_path && st.urls[p.plan_path];
       var inp = '<input type="file" class="cf-input" id="rd-file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif"' + (st.planBusy ? ' disabled' : '') + '>';
       var mode = st.wall ? ' wall-on' : st.cam ? ' cam-on cam-pick' : st.add ? ' cam-on placing' : st.furn ? ' cam-on' : '';
-      return '<div class="txt-card est-card rd-plan" id="rd-plan-card"><span class="label ct-label">도면</span>' +
-        (p.plan_path ? '<div class="rd-plan-box' + mode + ((st.zoom || 1) > 1 ? ' zoomed' : '') + '">' + (src ? '<div class="rd-plan-scroll"><div class="rd-cam-wrap"><img id="rd-plan-img" src="' + esc(src) + '" alt="올린 도면" draggable="false"' + (mode ? '' : ' data-rzoom data-rname="도면"') + '>' +
+      return '<div class="txt-card est-card rd-plan' + (st.full && src ? ' rd-full' : '') + '" id="rd-plan-card"><div class="rd-plan-hd"><span class="label ct-label">도면</span>' + (src ? fullBtn() + zoomBtns() : '') + '</div>' +   // 제목 줄: 도면 · 전체 화면 · (오른쪽) − 배율 ＋ — 도면을 가리지 않게 상자 위로 (2026-10-30)   // 전체화면: 도면 크게 + 옆(휴대폰은 아래)에 고치는 칸
+        (p.plan_path ? '<div class="rd-plan-box' + mode + ((st.zoom || 1) > 1 ? ' zoomed' : '') + '">' + (src ? '<div class="rd-plan-scroll"><div class="rd-cam-wrap"><img id="rd-plan-img" src="' + esc(src) + '"' + (st.planWH && st.planWH.src === src ? ' width="' + st.planWH.w + '" height="' + st.planWH.h + '"' : '') + ' alt="올린 도면" draggable="false">' +
           '<svg class="rd-wall-svg" id="rd-wall-svg" aria-hidden="true"></svg>' +
-          '<svg class="rd-cam-svg" id="rd-cam-svg" aria-hidden="true"' + (st.cam || st.furn || st.add ? ' data-camtap' : '') + '></svg></div></div>' + zoomBtns() : '<p class="hint">도면 불러오는 중…</p>') + '</div>' + (st.wall ? wallRow() : camRow() + furnRow() + wallRow() + guideRow()) : '') +
+          '<svg class="rd-cam-svg" id="rd-cam-svg" aria-hidden="true"' + (st.cam || st.furn || st.add ? ' data-camtap' : '') + '></svg></div></div>' : '<p class="hint">도면 불러오는 중…</p>') + '</div>' + '<div class="rd-plan-rows">' + (st.wall ? wallRow() : wallRow() + furnRow() + camRow() + guideRow()) + '</div>' : '') +   // 순서: 3D 밑그림 → 가구·구조 → 카메라 → 밑그림 미리보기
         '<label class="btn btn-outline cf-add rd-plan-add' + (st.planBusy ? ' busy' : '') + '">' + I.plus + '<span>' + (st.planBusy ? '도면 올리는 중…' : p.plan_path ? '다른 도면 올리기' : '도면 사진 올리기') + '</span>' + inp + '</label>' +
         '<p class="hint">주소·동호수가 적혀 있으면 가리고 올려 주세요.</p>' +
         '</div>';
     }
     function pickCard() {
-      return '<div class="txt-card est-card"><span class="label ct-label" id="rd-views-l">만들 그림</span>' +
-        '<div class="est-cboxes rd-views" role="group" aria-labelledby="rd-views-l">' + RP.VIEWS.map(function (v) {
-          var on = d.views.indexOf(v.key) >= 0;
-          return '<label class="est-cbox' + (on ? ' on' : '') + '"><input type="checkbox" data-rv="' + esc(v.key) + '"' + (on ? ' checked' : '') + '><span class="ph-box" aria-hidden="true">' + I.check + '</span><span class="pk-t">' + esc(v.name) + '</span></label>';
+      var dm = !!st.delMode;
+      return '<div class="txt-card est-card" id="rd-pick-card"><div class="rd-pick-hd"><span class="label ct-label" id="rd-views-l">만들 그림</span>' +
+        '<button type="button" class="rd-cam-clear rd-del' + (dm ? ' on' : '') + '" data-viewsdel aria-pressed="' + dm + '">' + (dm ? '<span>저장</span>' : I.trash + '<span>삭제</span>') + '</button></div>' +   // 삭제를 누르면 칸마다 X, 저장을 누르면 끝 (지운 것은 바로 저장됨)
+        '<div class="est-cboxes rd-views' + (dm ? ' del-mode' : '') + '" role="group" aria-labelledby="rd-views-l">' + allViews().map(function (k) {
+          var on = d.views.indexOf(k) >= 0;
+          var x = dm && k !== 'overview' ? '<span class="rd-tile-x" role="button" tabindex="0" data-tiledel="' + esc(k) + '" aria-label="' + esc(viewName(k)) + ' 삭제">' + I.close + '</span>' : '';
+          return '<label class="est-cbox' + (on ? ' on' : '') + (RP.roomOf(k) && st.roomSel === k ? ' sel' : '') + '">' + x + '<input type="checkbox" data-rv="' + esc(k) + '"' + (on ? ' checked' : '') + (dm ? ' disabled' : '') + '><span class="ph-box" aria-hidden="true">' + I.check + '</span><span class="pk-t">' + tileName(k) + '</span></label>';
+        }).join('') + (addAny() && !dm ? '<button type="button" class="rd-room-add' + (st.roomAdd ? ' on' : '') + '" data-roomadd aria-pressed="' + !!st.roomAdd + '">' + I.plus + '<span>방 추가</span></button>' : '') +   // 방 추가 (점선 칸) → 침실·욕실·발코니 고르기
+        '</div>' + roomTip() + '</div>';
+    }
+    // 칸 이름: 침실·욕실·발코니는 번호 아래에 종류 단추('서재 ▾', 아무 종류도 없는 침실은 '종류 ▾') — 이것을 누를 때만 종류 고르기가 열림 (칸을 누르면 다른 칸처럼 켜기·끄기)
+    function tileName(k) {
+      var r = RP.roomOf(k);
+      if (!r || !r.n) return esc(viewName(k));
+      var kind = r.use !== RP.catOf(r.cat).plain ? r.short : '종류', on = st.roomSel === k;
+      return esc(r.base) + '<small class="rd-kind" role="button" tabindex="0" data-roomkind="' + esc(k) + '" aria-expanded="' + on + '" aria-label="' + esc(r.base) + ' 종류 고르기">' + esc(kind) + '<span aria-hidden="true">' + (on ? ' ▴' : ' ▾') + '</span></small>';
+    }
+    function drawPick() { var el = $('#rd-pick-card', page); if (el) el.outerHTML = pickCard(); syncGo(); }
+    // 방 칸을 고르면(켜면) 그 방만 아래에 용도 고르기 · 빼기 (2026-10-30 — 늘 펼쳐 두지 않음)
+    function addCats() { return RP.ROOM_CATS.filter(function (c) { return catKeys(c.key).length < c.max; }); }   // 더 넣을 수 있는 침실·욕실·발코니
+    function addAny() { return addCats().length + d.gone.length; }   // 방 추가로 넣을 수 있는 것 (+ 지운 고정 공간)
+    function roomTip() {
+      if (st.roomAdd && addAny()) return '<div class="rd-cam-tip rd-furn-tip rd-room-tip" role="group" aria-label="방 추가"><div class="rd-furn-hd"><span class="rd-furn-msg"><b>방 추가</b> · 어떤 방인가요?</span></div>' +
+        '<div class="rd-cam-chips">' + addCats().map(function (c) { return '<button type="button" class="rd-cam-chip" data-roomaddc="' + c.key + '"><span>' + esc(c.base) + '</span></button>'; }).join('') +
+        RP.VIEWS.filter(function (v) { return d.gone.indexOf(v.key) >= 0; }).map(function (v) { return '<button type="button" class="rd-cam-chip" data-roomaddf="' + esc(v.key) + '"><span>' + esc(v.name) + '</span></button>'; }).join('') + '</div></div>';
+      if (st.delMode) return '';
+      var k = st.roomSel, r = k && d.rooms.indexOf(k) >= 0 && RP.roomOf(k); if (!r) return '';
+      return '<div class="rd-cam-tip rd-furn-tip rd-room-tip" role="group" aria-label="' + esc(r.base) + ' 종류"><div class="rd-furn-hd"><span class="rd-furn-msg"><b>' + esc(r.base) + '</b> · ' + esc(RP.catOf(r.cat).ask) + '</span></div>' +
+        '<div class="rd-cam-chips">' + RP.usesFor(r.cat, catKeys('bed').length).map(function (u) {   // 욕실·발코니는 지금 있는 침실마다 '침실 1' '침실 2' …
+          var on = u.key === r.use;
+          return '<button type="button" class="rd-cam-chip' + (on ? ' on' : '') + '" data-roomuse="' + u.key + '" aria-pressed="' + on + '"><span>' + esc(u.chip || u.name) + '</span></button>';
         }).join('') + '</div></div>';
     }
+    // 방 칸 바꾸기 (ents: [{ from: 예전 열쇠 | '', use: 용도 }] 새 차례대로): 번호를 다시 붙이고, 고른 칸·카메라·현재 집 사진 공간이 그 방을 따라감 (용도만 바꾸면 카메라도 그대로)
+    function setRooms(ents) {
+      // 침실 번호가 바뀌면(빼기·종류 바꾸기) 그 침실의 욕실·발코니도 따라감 — 침실이 없어지면 공용 욕실·거실 쪽 발코니로
+      var bedNew = {}, nb = 0;
+      ents.forEach(function (e) { var u = RP.useOf(e.use); if (u && u.cat === 'bed') { nb++; var r0 = e.from && RP.roomOf(e.from); if (r0 && r0.cat === 'bed' && r0.n) bedNew[r0.n] = nb; } });
+      ents.forEach(function (e) { var m = /^(en|bal)([1-6])$/.exec(e.use); if (m) { var nn = bedNew[+m[2]] || (+m[2] <= nb && !Object.keys(bedNew).length ? +m[2] : 0); e.use = nn ? m[1] + nn : (m[1] === 'en' ? 'pbath' : 'lbal'); } });
+      var keys = RP.roomsOf(ents.map(function (e) { return e.use; })).keys, from = {};
+      ents.forEach(function (e, i) { if (e.from && keys[i]) from[e.from] = keys[i]; });
+      var mv = function (k) { return RP.roomOf(k) ? from[k] || '' : k; };
+      d.rooms = keys;
+      d.views = d.views.map(mv).filter(function (k, i, a) { return k && a.indexOf(k) === i; });
+      var cams = {}; Object.keys(d.cams).forEach(function (k) { var nk = mv(k); if (nk) cams[nk] = d.cams[k]; }); d.cams = cams;
+      d.refs.forEach(function (r) { if (r.view) r.view = mv(r.view); });
+      st.cam = st.cam ? mv(st.cam) : ''; if (!st.cam) st.camStep = ''; st.camSel = st.camSel ? mv(st.camSel) : '';
+      st.roomSel = st.roomSel ? mv(st.roomSel) : '';
+      st.gcache = {}; persist(); rerender();
+    }
+    // 칸 삭제: 침실·욕실·발코니는 빼고 번호를 다시 붙임, 고정 공간(거실·주방·파우더룸·현관·복도)은 숨김 — '방 추가'로 다시 넣음
+    function delSpace(dk) {
+      var rd = roomEnts(), di = d.rooms.indexOf(dk); st.roomSel = '';
+      if (di >= 0) { rd.splice(di, 1); return setRooms(rd); }
+      if (!dk || RP.roomOf(dk) || dk === 'overview') return drawPick();
+      d.gone.push(dk); d.views = d.views.filter(function (v) { return v !== dk; }); delete d.cams[dk];
+      d.refs.forEach(function (r) { if (r.view === dk) r.view = ''; });
+      if (st.cam === dk) { st.cam = ''; st.camStep = ''; } if (st.camSel === dk) st.camSel = '';
+      st.gcache = {}; persist(); return rerender();
+    }
+    function roomEnts() { return d.rooms.map(function (k) { return { from: k, use: RP.roomOf(k).use }; }); }
     function styleCard() {
       return '<div class="txt-card est-card">' +
         '<div class="field"><span class="label" id="rd-style-l">분위기</span>' +
@@ -1017,7 +1399,7 @@
       var sub = [styleName(inp.style), K.fmtWhen ? K.fmtWhen(r.created_at) : ''].filter(Boolean).join(' · ');
       return '<article class="rd-item' + (old ? ' old' : '') + '" data-rid="' + esc(r.id) + '">' +
         '<div class="rd-img' + (r.status === 'done' ? '' : ' empty') + '">' + img + (old ? '<span class="rd-old">예전 공사 내용</span>' : '') + '</div>' +
-        '<div class="rd-meta"><b>' + esc(name) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + (r.caption ? '<p>' + esc(r.caption) + '</p>' : '') +
+        '<div class="rd-meta"><b>' + viewLabel(r.view) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + (r.caption ? '<p>' + esc(r.caption) + '</p>' : '') +
         '<details class="rd-in"><summary>만든 내용 보기</summary><ul>' + (inp.lines.length ? inp.lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') : '<li>공사 내용 없음</li>') + '</ul>' +
         ((inp.size ? '<p>평수 ' + esc(inp.size) + '평</p>' : '') + (inp.memo ? '<p>요청 사항: ' + esc(inp.memo) + '</p>' : '') +
           (inp.cam ? '<p>카메라: 도면에서 찍은 곳' + (inp.cam.tx != null ? '·방향(' + RP.camDirKo(inp.cam) + '쪽을 봄)' : '') + (inp.guide ? ' · 3D 밑그림대로' : '') + '</p>' : '') +
@@ -1080,6 +1462,7 @@
 
     /* ----- 만들기 ----- */
     function start(views, stay) {
+      views = views.map(nowKey).filter(function (k, i, a) { return k && a.indexOf(k) === i; });   // 예전 칸(안방·작은방) → 지금 칸
       if (!views.length || st.working) return;
       if (!p.plan_path) return K.notice ? K.notice('도면 사진을 먼저 올려 주세요') : null;
       st.working = true; syncGo();
@@ -1090,7 +1473,7 @@
         // + 빨간 표시를 그린 도면을 따로 올려 그 그림의 도면으로 (못 만들면 원래 도면 + 좌표만)
         // + 벽 선이 있고 바라볼 쪽까지 찍었으면 3D 밑그림을 그려 올림 (input.guide — 못 만들면 밑그림 없이)
         return Promise.all(views.map(function (v) {
-          var c = v !== 'overview' && d.cams[v];
+          var c = v !== 'overview' && camFull(v);
           if (!c) return { v: v, plan: p.plan_path, input: input };
           var mk = markedPlan(c).then(function (blob) { return DB.uploadRenderPlan(p.id, blob); }).then(function (path) { return path; }, function (e) {
             try { console.warn('[3D] 카메라 표시 도면을 만들지 못함', e && e.message); } catch (x) {}
@@ -1172,8 +1555,10 @@
     }
 
     /* ----- 입력 ----- */
+    function syncM(el) { var lb = el && el.closest && el.closest('.rd-wnum'), m = lb && lb.querySelector('.rd-m'); if (m) m.textContent = mOf(String(el.value).trim() || el.placeholder); }
     page.addEventListener('input', function (e) {
       var el = e.target, i;
+      syncM(el);   // mm 옆 미터 글자
       if (el.id === 'rd-memo') { d.memo = el.value.slice(0, RP.MEMO_MAX); persist(); return; }
       if ((i = el.getAttribute('data-mn')) != null) { var ln = lineOf(el.getAttribute('data-mnkey'), i); if (ln) { ln.note = el.value.slice(0, RP.NOTE_MAX); persist(); } return; }
       if (el.id === 'rd-title') { p.title = el.value.replace(/\s+/g, ' ').trim().slice(0, 60) || NOEST; persist(); return; }
@@ -1184,7 +1569,10 @@
       var el = e.target, i;
       if ((i = el.getAttribute('data-cin')) != null && !String(el.value).trim()) { d.custom.splice(+i, 1); persist(); rerender(); }   // 비운 줄은 지움
     });
-    page.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'rd-new') { e.preventDefault(); addCustom(); } });
+    page.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.id === 'rd-new') { e.preventDefault(); addCustom(); }
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.hasAttribute && (e.target.hasAttribute('data-roomkind') || e.target.hasAttribute('data-tiledel'))) { e.preventDefault(); e.target.click(); }   // 키보드로 '종류 ▾'
+    });
     function addCustom() {
       var inp = $('#rd-new', page), v = String((inp && inp.value) || '').replace(/\s+/g, ' ').trim().slice(0, RP.CUSTOM_LEN);
       if (!v) { if (inp) inp.focus(); return; }
@@ -1194,33 +1582,35 @@
     }
     page.addEventListener('change', function (e) {
       var el = e.target, x;
+      if (el.hasAttribute('data-fmag')) { st.mag = el.checked; magSet(st.mag); return; }   // 자석 켜고 끄기
       if (el.id === 'rd-file') { var f = el.files && el.files[0]; el.value = ''; if (f) setPlan(f); return; }
       if (el.hasAttribute('data-mph') && el.type === 'file') { var mf = el.files && el.files[0], mk2 = el.getAttribute('data-mphkey'), ml2 = el.getAttribute('data-mph'); el.value = ''; if (mf) setMatPhoto(mk2, ml2, mf); return; }
       if (el.id === 'rd-ref-file') { var fs = Array.prototype.slice.call(el.files || []); el.value = ''; if (fs.length) addRefs(fs); return; }
       if (/^rd-refv-\d+$/.test(el.id)) { var rf = d.refs[+el.id.slice(8)]; if (rf) { rf.view = el.value; persist(); } return; }
       if (el.hasAttribute('data-fw')) {
-        var fwv = parseFloat(String(el.value).replace(',', '.')), cf = d.furn[st.furn];
-        if (cf && fwv >= 0.2 && fwv <= 8) { cf.w = Math.round(fwv * 100) / 100; st.gcache = {}; persist(); drawPlan(); } else if (cf) el.value = cf.w.toFixed(1);
+        var fwv = fromMM(el.value), cf = d.furn[st.furn];   // mm (200 ~ 8000)
+        if (cf && fwv >= 0.2 && fwv <= 8) { cf.w = Math.round(fwv * 1000) / 1000; st.gcache = {}; persist(); drawPlan(); } else if (cf) el.value = toMM(cf.w);
         return;
       }
       if (el.hasAttribute('data-fh') || el.hasAttribute('data-fdp')) {   // 높이·깊이 (비우면 기본 — 높이는 천장까지인 것도 있음)
-        var isH = el.hasAttribute('data-fh'), fname = isH ? 'h' : 'dp', fv = String(el.value).trim() === '' ? null : parseFloat(String(el.value).replace(',', '.')), ch = d.furn[st.furn];
+        var isH = el.hasAttribute('data-fh'), fname = isH ? 'h' : 'dp', fv = String(el.value).trim() === '' ? null : fromMM(el.value), ch = d.furn[st.furn];   // mm
         var ok2 = fv == null || (isH ? fv >= 0.1 && fv <= 4 : fv >= 0.02 && fv <= 5);
-        if (ch && ok2) { if (fv == null) delete ch[fname]; else ch[fname] = Math.round(fv * 100) / 100; st.gcache = {}; persist(); drawPlan(); } else if (ch) el.value = ch[fname] != null ? ch[fname] : '';
+        if (ch && ok2) { if (fv == null) delete ch[fname]; else ch[fname] = Math.round(fv * 1000) / 1000; st.gcache = {}; persist(); drawPlan(); } else if (ch) el.value = ch[fname] != null ? toMM(ch[fname]) : '';
         return;
       }
-      if (el.hasAttribute('data-fl')) {   // 가벽 길이(m) → 가운데는 그대로, 양쪽 끝을 늘이고 줄임
-        var flv = parseFloat(String(el.value).replace(',', '.')), cl2 = d.furn[st.furn];
+      if (el.hasAttribute('data-fl')) {   // 가벽 길이(mm) → 가운데는 그대로, 양쪽 끝을 늘이고 줄임
+        var flv = fromMM(el.value), cl2 = d.furn[st.furn];
         if (cl2 && hasWalls() && flv >= 0.1 && flv <= 30) {
           var nL = flv / d.walls.m, ar2 = cl2.ar || 1, hx = cl2.tx - cl2.x, hy = (cl2.ty - cl2.y) * ar2, hl = Math.hypot(hx, hy) || 1;
           cl2.L = Math.round(nL * 1e4) / 1e4; cl2.tx = Math.max(0, Math.min(1, cl2.x + hx / hl * nL / 2)); cl2.ty = Math.max(0, Math.min(1, cl2.y + hy / hl * nL / 2 / ar2));
           st.gcache = {}; persist(); drawPlan();
-        } else if (cl2 && hasWalls()) el.value = (cl2.L * d.walls.m).toFixed(1);
+        } else if (cl2 && hasWalls()) el.value = toMM(cl2.L * d.walls.m);
         return;
       }
       if ((x = el.getAttribute('data-rv'))) {
         d.views = d.views.filter(function (k) { return k !== x; }); if (el.checked) d.views.push(x);
-        el.closest('.est-cbox').classList.toggle('on', el.checked); syncGo(); persist(); drawPlan(); return;
+        st.roomSel = ''; st.roomAdd = false;   // 칸 켜기·끄기는 모든 칸이 같게 (종류 고르기는 칸 안의 '종류 ▾'로)
+        drawPick(); persist(); drawPlan(); return;
       }
       if ((x = el.getAttribute('data-mk'))) {   // 공사 항목 전체 넣기/빼기 (일부만 넣은 항목을 누르면 전부 넣기)
         var it = itemOf(x); if (!it) return;
@@ -1235,19 +1625,24 @@
       }
       if (el.id === 'rd-style') { d.style = el.value; persist(); return; }
       if (el.hasAttribute('data-wlen') || el.hasAttribute('data-wceil')) {   // 고른 선의 실제 길이 → 도면 전체 크기 / 천장 높이
-        var wv = parseFloat(String(el.value).replace(',', '.')), w = d.walls, sl = w && w.s[st.wsel];
+        var wv = fromMM(el.value), w = d.walls, sl = w && w.s[st.wsel];   // mm
         if (!w) return;
-        if (el.hasAttribute('data-wceil')) { if (wv >= 2 && wv <= 4) { wallSnap(); w.h = Math.round(wv * 100) / 100; } }
+        if (el.hasAttribute('data-wceil')) { if (wv >= 2 && wv <= 4) { wallSnap(); w.h = Math.round(wv * 1000) / 1000; } }
         else if (sl && wv >= 0.2 && wv <= 100 && RW.segLen(sl, w.ar) > 0) { wallSnap(); w.m = Math.round(wv / RW.segLen(sl, w.ar) * 1000) / 1000; w.src = 'user'; }
         return wallChanged();
       }
       if (el.id === 'rd-size' || el.hasAttribute('data-cin') || el.hasAttribute('data-mn')) drawList();   // 공사 내용이 바뀌면 '예전 공사 내용' 표시도 다시
     });
+    page.addEventListener('change', function (e) { if (e.target.isConnected) syncM(e.target); });   // 잘못 적어 값이 되돌아간 경우에도 미터 글자를 맞춤
     page.addEventListener('click', function (e) {
       var t = e.target, x;
+      if ((x = t.closest && t.closest('[data-roomkind]'))) {   // 칸 안의 '종류 ▾': 칸은 켜거나 끄지 않고 종류 고르기만 열고 닫음
+        e.preventDefault(); var kk = x.getAttribute('data-roomkind'); st.roomSel = st.roomSel === kk ? '' : kk; st.roomAdd = false; return drawPick();
+      }
+      if (t.closest && t.closest('[data-pfull]')) return setFull(!st.full);   // 전체화면
       if ((x = t.closest && t.closest('[data-pzoom]'))) {   // 도면 크게·작게
-        var zc = st.zoom || 1, up = +x.getAttribute('data-pzoom') > 0;
-        return setZoom(up ? ZOOMS.filter(function (v) { return v > zc + 0.01; })[0] || ZMAX : ZOOMS.filter(function (v) { return v < zc - 0.01; }).pop() || 1);
+        var zc = st.zoom || 1, zd = +x.getAttribute('data-pzoom'), zn = zd > 0 ? zc * ZSTEP : zd < 0 ? zc / ZSTEP : 1;   // 25%씩 (누를 때마다 1.25배), 가운데 배율 = 100%로
+        return setZoom(zn < 1.05 ? 1 : zn);
       }
       if (((st.fjust && Date.now() - st.fjust < 450) || (st.pjust && Date.now() - st.pjust < 450)) && t.closest && t.closest('.rd-plan-box')) return;   // 도면 위 가구를 누르거나 끈 바로 뒤, 두 손가락으로 키운 바로 뒤 (도면 누르기로 처리되지 않게)
       if (t.closest && t.closest('[data-fkey]')) return;
@@ -1263,13 +1658,48 @@
         var ln2 = lineOf(inp.getAttribute('data-mnkey'), inp.getAttribute('data-mn')); if (ln2) { ln2.note = inp.value; persist(); drawList(); }
         return;
       }
-      if ((x = t.closest('[data-cam]'))) { var ck = x.getAttribute('data-cam'); st.cam = st.cam === ck ? '' : ck; st.camStep = ''; st.wall = false; st.furn = ''; st.add = ''; return drawPlan(); }
+      if ((x = t.closest('[data-camsel]'))) { st.camSel = x.getAttribute('data-camsel'); st.cam = ''; st.camStep = ''; st.camNear = false; st.furn = ''; st.add = ''; return drawPlan(); }   // 공간 고르기만 (찍기 그만)
+      if (t.closest('[data-camgo]')) {   // 카메라 찍기: 켜면 ① 서 있을 곳 → ② 바라볼 쪽, 다시 누르면 그만 (서 있을 곳만 찍은 채로 둘 수 있음)
+        if (st.cam) { st.cam = ''; st.camStep = ''; } else { st.cam = camSelKey(); st.camStep = ''; st.wall = false; st.furn = ''; st.add = ''; }   // 그만 (아무것도 안 찍었으면 다시 자동) / 다시 찍기
+        st.camNear = false; return drawPlan();
+      }
+      if ((x = t.closest('[data-cammode]'))) {   // 카메라 자동 / 직접 찍기 고르기 — 이미 고른 쪽이면 그대로
+        var cm = camSelKey(), wantAuto = x.getAttribute('data-cammode') === 'auto';
+        if (wantAuto === camAuto(cm)) return;
+        st.camBak = st.camBak || {}; st.camNear = false; st.camStep = '';
+        if (!wantAuto) { if (st.camBak[cm]) { d.cams[cm] = st.camBak[cm]; delete st.camBak[cm]; st.cam = ''; } else { st.cam = cm; st.wall = false; st.furn = ''; st.add = ''; } }   // 직접: 치워 둔 카메라를 되살리거나 바로 찍기 시작
+        else { if (d.cams[cm]) st.camBak[cm] = d.cams[cm]; delete d.cams[cm]; st.cam = ''; }   // 자동: 찍은 카메라를 치우고 AI가 정함
+        st.gcache = {}; persist(); return drawPlan();
+      }
+      if ((x = t.closest('[data-cam]'))) { var ck = x.getAttribute('data-cam'); st.camSel = ck; st.cam = ck; st.camNear = false; st.camStep = d.cams[ck] && d.cams[ck].tx == null ? 'dir' : ''; st.wall = false; st.furn = ''; st.add = ''; return drawPlan(); }   // 밑그림 미리보기의 빈 칸: 그 공간 바로 찍기
+      if (t.closest('[data-viewsdel]')) { st.delMode = !st.delMode; st.roomSel = ''; st.roomAdd = false; if (!st.delMode) persist(true); return drawPick(); }   // 삭제 ↔ 저장
+      if ((x = t.closest('[data-tiledel]'))) { e.preventDefault(); return delSpace(x.getAttribute('data-tiledel')); }   // 칸의 X
+      if (st.delMode && t.closest && t.closest('.rd-views .est-cbox')) { e.preventDefault(); return; }   // 삭제하는 동안은 칸을 눌러도 켜고 끄지 않음
+      if ((x = t.closest('[data-roomaddf]'))) {   // 지운 고정 공간 다시 넣기 (켠 채로)
+        var fk = x.getAttribute('data-roomaddf'); st.roomAdd = false; d.gone = d.gone.filter(function (v) { return v !== fk; });
+        if (d.views.indexOf(fk) < 0) d.views.push(fk); persist(); return rerender();
+      }
+      if ((x = t.closest('[data-roomuse]'))) {   // 고른 칸 종류 (침실은 고른 것을 다시 누르면 그냥 침실로)
+        var ru = roomEnts(), ui = d.rooms.indexOf(st.roomSel), nu = x.getAttribute('data-roomuse'); if (ui < 0) return;
+        var rcat = RP.catOf(RP.roomOf(st.roomSel).cat);
+        if (ru[ui].use === nu) { if (!rcat.plain) return; nu = rcat.plain; }
+        ru[ui].use = nu; return setRooms(ru);
+      }   // 방 빼기
+      if (t.closest('[data-roomadd]')) { st.roomAdd = !st.roomAdd; st.roomSel = ''; return drawPick(); }   // 방 추가 → 아래에서 침실·욕실·발코니 고르기
+      if ((x = t.closest('[data-roomaddc]'))) {   // 고른 공간 하나 더 → 켜고 골라서 바로 종류를 고르게 (욕실·발코니는 아직 없는 종류부터)
+        var rc = RP.catOf(x.getAttribute('data-roomaddc')); st.roomAdd = false; if (!rc || catKeys(rc.key).length >= rc.max) return drawPick();
+        var cu = RP.usesFor(rc.key, catKeys('bed').length), have = catKeys(rc.key).map(function (k) { return RP.roomOf(k).use; });
+        var nu = rc.plain || (cu.filter(function (u) { return have.indexOf(u.key) < 0; })[0] || cu[0]).key;
+        var ra = roomEnts(); ra.push({ from: '', use: nu }); st.roomSel = ''; setRooms(ra);
+        var nk = d.rooms[d.rooms.length - 1]; if (d.views.indexOf(nk) < 0) d.views.push(nk); st.roomSel = nk; persist(); return rerender();
+      }   // 방 추가 (침실로 — 용도는 바로 고름)
+      if (t.closest('[data-faddx]')) { st.add = ''; return drawPlan(); }   // 가구 놓기 취소
       if ((x = t.closest('[data-ftab]'))) { var tg = x.getAttribute('data-ftab'); if (st.ftab !== tg) { st.ftab = tg; st.add = ''; drawPlan(); } return; }   // 가구 분류 탭
       if ((x = t.closest('[data-furn]'))) {   // 가구 단추: 놓은 것(하나만 놓는 종류)은 고르기, 아니면 새로 놓기 — 같은 단추를 다시 누르면 그만
         var fk = x.getAttribute('data-furn'), fdef = RP.furnDef(fk), have = keysOf(fk), selK = st.furn ? st.furn.split('#')[0] : '';
         st.cam = ''; st.camStep = ''; st.wall = false;
         if (st.add === fk) st.add = '';   // 놓기 그만
-        else if (fdef.multi && nextKey(fk)) { st.add = fk; st.furn = ''; }   // 기둥·가벽·하부장: 누를 때마다 하나 더
+        else if (nextKey(fk)) { st.add = fk; st.furn = ''; }   // 누를 때마다 하나 더 (모든 가구, 여섯 개까지 — 놓은 것을 고치려면 도면에서 누름)
         else if (selK === fk) st.furn = '';   // 고른 걸 다시 누르면 고르기 끝
         else if (have.length) { st.furn = have[0]; st.add = ''; }   // 이미 놓은 건 고르기
         else { st.add = fk; st.furn = ''; }
@@ -1299,23 +1729,36 @@
       if ((x = t.closest('[data-gzoom]'))) { var gk = x.getAttribute('data-gzoom'), gu = guideUrl(gk, true); return gu ? K.ask({ title: viewName(gk) + ' 밑그림', text: '<img class="zoom-img" src="' + esc(gu) + '" alt="">', cancel: false, ok: '닫기' }) : null; }
       if (t.closest('[data-wauto]')) return extract();
       if (t.closest('[data-wdraw]')) return startDraw();
-      if (t.closest('[data-wedit]')) { st.furn = ''; st.add = ''; st.wall = true; st.wtool = 'pick'; st.wsel = -1; st.wa = null; st.wh = []; st.cam = ''; st.camStep = ''; return drawPlan(); }
-      if (t.closest('[data-wdone]')) return endWalls();
+      if (t.closest('[data-wedit]')) { st.furn = ''; st.add = ''; st.wall = true; st.wtool = 'pick'; st.wsel = -1; st.wa = null; st.wh = []; st.cam = ''; st.camStep = ''; st.wOrig = d.walls ? JSON.stringify(d.walls) : null; return drawPlan(); }
+      if (t.closest('[data-wdone]')) { st.wOrig = undefined; return endWalls(); }
+      if (t.closest('[data-wquit]')) return quitWalls();
       if (t.closest('[data-wclear]')) {
-        return K.ask({ title: '벽 선을 지울까요?', text: '3D 밑그림 없이 예전처럼 도면만 보고 그려요. 이미 만든 그림은 그대로예요.', cancel: '그대로 두기', ok: '지우기', okClass: 'btn-danger' }).then(function (ok) {
+        return K.ask({ title: '벽 선을 삭제할까요?', text: '3D 밑그림 없이 예전처럼 도면만 보고 그려요. 이미 만든 그림은 그대로예요.', cancel: '그대로 두기', ok: '삭제', okClass: 'btn-danger' }).then(function (ok) {
           if (!ok) return; d.walls = null; st.gcache = {}; persist(); drawPlan();
         });
       }
       if ((x = t.closest('[data-wtool]'))) { st.wtool = x.getAttribute('data-wtool'); st.wa = null; st.hover = null; if (st.wtool === 'draw') st.wsel = -1; return refreshWalls(); }
       if ((x = t.closest('[data-wk]'))) {
         var wk = x.getAttribute('data-wk'), sg = d.walls && d.walls.s[st.wsel];
-        if (st.wtool === 'pick' && sg) { if (sg[4] !== wk) { wallSnap(); sg[4] = wk; wallChanged(); } return; }   // 고른 선의 종류 바꾸기
-        st.wkind = wk; st.wtool = 'draw'; st.wsel = -1; st.wa = null; return refreshWalls();   // 그 종류로 선 긋기
+        if (st.wtool === 'pick') { if (sg && sg[4] !== wk) { wallSnap(); sg[4] = wk; wallChanged(); } return; }   // 벽 수정: 고른 선의 종류만 바꿈 (고른 선이 없으면 아무 일 없음)
+        st.wkind = wk; st.wa = null; return refreshWalls();   // 벽 생성: 그 종류로 선 긋기
       }
       if (t.closest('[data-wundo]')) { if (st.wh.length) undoWall(); return; }
       if (t.closest('[data-wdel]')) { if (d.walls && d.walls.s[st.wsel]) { wallSnap(); d.walls.s.splice(st.wsel, 1); st.wsel = -1; wallChanged(); } return; }
       if (t.closest('[data-wcancel]')) { st.wa = null; st.hover = null; return refreshWalls(); }
-      if (t.closest('[data-camclear]')) { delete d.cams[st.cam]; st.cam = ''; st.camStep = ''; persist(); return drawPlan(); }
+      if ((x = t.closest('[data-vh]'))) { d.vh = RP.vhOf(x.getAttribute('data-vh')).key; st.gcache = {}; persist(); return drawPlan(); }   // 카메라 각도 상·중·하
+      if ((x = t.closest('[data-lens]'))) { d.fov = RP.lensOf(+x.getAttribute('data-lens')); st.gcache = {}; persist(); return drawPlan(); }   // 카메라 시야
+      if (t.closest('[data-camreset]')) {   // 카메라 위치 초기화: 찍은 위치를 모두 지움 (시야는 그대로)
+        return K.ask({ title: '카메라 위치를 초기화할까요?', text: '찍은 카메라 위치 ' + Object.keys(d.cams).length + '곳을 지우고, 그 공간은 AI가 도면에서 찾아 그려요. 이미 만든 그림은 그대로예요.', cancel: '그대로 두기', ok: '초기화', okClass: 'btn-danger' }).then(function (ok) {
+          if (!ok) return; d.cams = {}; st.cam = ''; st.camStep = ''; st.camNear = false; st.camBak = {}; st.gcache = {}; persist(); drawPlan();
+        });
+      }
+      if (t.closest('[data-furnreset]')) {   // 가구 초기화: 놓은 가구·구조·벽 마감을 모두 지움
+        return K.ask({ title: '가구·구조 위치를 초기화할까요?', text: '도면에 놓은 가구·구조·벽 마감 ' + RP.furnKeys(d.furn).length + '개를 지워요. 이미 만든 그림은 그대로예요.', cancel: '그대로 두기', ok: '초기화', okClass: 'btn-danger' }).then(function (ok) {
+          if (!ok) return; d.furn = {}; st.furn = ''; st.add = ''; st.fdrag = null; st.gcache = {}; persist(); drawPlan();
+        });
+      }
+
       if (t.closest('[data-camtap]')) return camTap(e);
       if (t.closest('[data-cadd]')) return addCustom();
       if ((x = t.closest('[data-cdel]'))) { d.custom.splice(+x.getAttribute('data-cdel'), 1); persist(); return rerender(); }
@@ -1340,7 +1783,7 @@
     refresh().then(function () { if (page.isConnected) { rerender(); poll(); } }, function () {});
   }
 
-  K.routes.renders = function () { return viewList(); };
+  K.routes.renders = function (args) { return args && args[0] === 'settings' ? viewFurnSize() : viewList(); };   // #/renders/settings = 가구 크기 설정
   K.routes.render = function (args) {
     var id = decodeURIComponent(args[0] || '');
     if (!id || id === 'new') { K.replaceTo('#/renders'); return; }

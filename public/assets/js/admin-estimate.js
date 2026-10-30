@@ -558,7 +558,7 @@
         '<div class="field"><label for="f-site-region-sido">지역</label>' + K.regionPick('f-site-region', doc.site.region, { bind: 'site.region' }) + '</div>' +
         fld('site.name', '아파트(건물) 이름·주소', doc.site.name, { ph: '예) 헬리오시티', max: 80 }) +
         fld('site.unit', '상세 주소 (동·호수)', doc.site.unit || '', { ph: '예) 101동 1001호', max: 40 }) +
-        fld('site.size', '평수', doc.site.size, { ph: '예) 32', mode: 'decimal', max: 8, suffix: '평' }) +
+        fld('site.size', '평수', doc.site.size, { ph: '예) 32', mode: 'decimal', max: 8, py: true }) +
         presetField() +
         fld('title', '공사명', doc.title, { ph: '비워 두면: 지역 + 건물 + 평수 + 인테리어 공사', max: 120, wide: true }) +
         '</div></div>' +
@@ -617,11 +617,12 @@
     function fld(path, label, val, o) {
       o = o || {};
       var id = 'f-' + path.replace(/\./g, '-');
-      var input = '<input class="input" id="' + id + '" data-bind="' + path + '" value="' + esc(val == null ? '' : val) + '"' +
+      var input = '<input class="input" id="' + id + '" data-bind="' + path + '"' + (o.py ? ' data-py' : '') + ' value="' + esc(val == null ? '' : val) + '"' +
         (o.type ? ' type="' + o.type + '"' : ' type="text"') + (o.mode ? ' inputmode="' + o.mode + '"' : '') + (o.max ? ' maxlength="' + o.max + '"' : '') +
         (o.ph ? ' placeholder="' + esc(o.ph) + '"' : '') + (o.type === 'tel' ? ' autocomplete="off"' : '') + '>';
       return '<div class="field' + (o.wide ? ' est-wide' : '') + '"><label for="' + id + '">' + esc(label) + '</label>' +
-        (o.suffix ? '<div class="est-suffix">' + input + '<span>' + esc(o.suffix) + '</span></div>' : input) +
+        (o.py ? '<div class="py-pair"><div class="est-suffix">' + input + '<span>평</span></div>' + K.m2Field(val, 'est-suffix', label) + '</div>'   // 평수: 오른쪽 ㎡ 칸 (서로 저절로)
+          : o.suffix ? '<div class="est-suffix">' + input + '<span>' + esc(o.suffix) + '</span></div>' : input) +
         (o.hint ? '<p class="hint">' + o.hint + '</p>' : '') + '</div>';
     }
     function setPath(path, v) {
@@ -1261,7 +1262,7 @@
           '<div class="est-chips set-psizes">' + ps.map(function (x) {
             return '<button type="button" class="est-chip' + (x.id === sel ? ' on' : '') + '" data-psel="' + esc(x.id) + '">' + esc(presetLabel(x)) + '</button>';
           }).join('') + '</div>' +
-          '<div class="est-addcat"><div class="est-suffix"><input class="input" id="set-newsize" inputmode="decimal" maxlength="5" placeholder="평형 (예: 32)"><span>평</span></div>' +
+          '<div class="est-addcat"><div class="py-pair"><div class="est-suffix"><input class="input" id="set-newsize" data-py inputmode="decimal" maxlength="5" placeholder="평형 (예: 32)"><span>평</span></div>' + K.m2Field('', 'est-suffix', '평형', '면적 (예: 105.8)') + '</div>' +
           '<button type="button" class="btn btn-outline" data-padd>' + I.plus + '평형 추가</button></div>' +
           (p ? '<div class="set-phead"><h2 class="est-h">' + esc(presetLabel(p)) + '일 때 수량</h2><button type="button" class="est-drop" data-pdel>이 평형 지우기</button></div>' +
             cfg.cats.filter(function (c) { return c.items.length; }).map(function (c) {

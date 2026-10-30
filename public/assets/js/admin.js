@@ -1159,7 +1159,7 @@
         '<div class="step"><span class="num">3</span><h2>현장 정보<span class="opt">(몰라도 괜찮아요)</span></h2></div>' +
         '<div class="field"><label for="f-place-sido">지역 · 동네 · 아파트 이름</label>' + regionPick('f-place', w.place || '', { detail: { ph: '예) 영통동 ○○아파트', label: '동네 · 아파트 이름', max: 40 } }) +
         '<p class="hint">고객님 집이 너무 자세히 드러나지 않게 동·단지 이름까지만 써 주세요. (호수는 쓰지 않기)</p></div>' +
-        '<div class="field"><label for="f-size">평수</label><div class="input-suffix"><input class="input" id="f-size" inputmode="decimal" maxlength="6" placeholder="예) 32" value="' + esc(sizeNum) + '"><span>평</span></div></div>' +
+        '<div class="field"><label for="f-size">평수</label><div class="py-pair"><div class="input-suffix"><input class="input" id="f-size" data-py inputmode="decimal" maxlength="6" placeholder="예) 32" value="' + esc(sizeNum) + '"><span>평</span></div>' + m2Field(sizeNum, 'input-suffix') + '</div></div>' +
         '<div class="field"><span class="label">건물 종류</span>' + choiceGroup('building', C.buildingTypes || [], w.building, false) + '</div>' +
         '<div class="field"><span class="label">공사 내용 <span class="opt">(여러 개 고를 수 있어요)</span></span>' + choiceGroup('scopes', C.workScopes || [], w.scopes, true) + '</div>' +
         '<div class="field"><label for="f-period">공사 기간</label><input class="input" id="f-period" maxlength="20" placeholder="예) 4주" value="' + esc(w.period || '') + '"></div>' +
@@ -1193,7 +1193,7 @@
             { label: '제목', cur: $('#f-title', page).value.trim(), val: inf.title, set: function (x) { $('#f-title', page).value = x; } },
             { label: '지역 · 동네 · 아파트', cur: $('#f-place', page).value.trim(), val: inf.place, set: function (x) {
               var box = $('#f-place', page).closest('[data-rg]'); box.outerHTML = regionPick('f-place', x, { detail: { ph: '예) 영통동 ○○아파트', label: '동네 · 아파트 이름', max: 40 } }); } },
-            { label: '평수', cur: $('#f-size', page).value.trim(), val: inf.size, set: function (x) { $('#f-size', page).value = x; } },
+            { label: '평수', cur: $('#f-size', page).value.trim(), val: inf.size, set: function (x) { var fs = $('#f-size', page); fs.value = x; fs.dispatchEvent(new Event('input', { bubbles: true })); } },   // ㎡ 칸도 같이
             { label: '건물 종류', cur: bld ? bld.value : '', val: inf.building, set: function (x) { $$('input[name=building]', page).forEach(function (r) { r.checked = r.value === x; }); } },
             { label: '공사 기간', cur: $('#f-period', page).value.trim(), val: inf.period, set: function (x) { $('#f-period', page).value = x; } },
           ];
@@ -1461,6 +1461,7 @@
         card('#/texts', I.pen, '홈페이지 문구', '메인 제목 · 상담 시간 · 대표 인사말') +
         card('#/estimates/settings', I.doc, '견적서 설정', '공사 항목 · 단가 · 평수별 수량') +
         card('#/contracts/settings', I.sign, '계약서 설정', '계약서 종류 · 입금 계좌 · 조항') +
+        card('#/renders/settings', I.cube, '3D 그림 가구 크기', '가구를 도면에 처음 놓을 때의 크기') +
         card('#/settings/calendar', I.cal, '구글 캘린더에 일정 보이기', '일정 달력을 구글 캘린더에서도 보기') +
         card('#/admins', I.users, '관리자', '관리자 추가 · 삭제') +
         card('#/privacy', I.lock2, '보관 기간 지난 자료', '기간이 지난 손님 정보 확인 · 삭제', '<em class="on" id="priv-pill">확인 중</em>') +
@@ -2503,12 +2504,34 @@
     return { refresh: sync, active: function () { return on; }, off: function () { if (on) set(false); }, button: btn };
   }
 
+  /* ---------- 평수 ↔ ㎡ (2026-10-30): 평수 칸 오른쪽 ㎡ 칸 — 한쪽을 고치면 다른 쪽이 저절로 (1평 = 400/121㎡ ≈ 3.3058㎡) ---------- */
+  var PY_M2 = 400 / 121;
+  function firstNum(v) { var m = /(\d+(?:\.\d+)?)/.exec(String(v == null ? '' : v).replace(/,/g, '')); return m ? parseFloat(m[1]) : NaN; }
+  function r1(n) { return isFinite(n) && n > 0 ? String(Math.round(n * 10) / 10) : ''; }
+  function m2Of(py) { return r1(firstNum(py) * PY_M2); }
+  function pyOf(m2) { return r1(firstNum(m2) / PY_M2); }
+  // ㎡ 칸 (평수 칸 바로 뒤에): cls = 그 화면의 단위 칸 모양(est-suffix · input-suffix)
+  function m2Field(py, cls, label, ph) {
+    return '<div class="' + (cls || 'est-suffix') + '"><input class="input" data-m2 inputmode="decimal" maxlength="7" value="' + esc(m2Of(py)) + '" placeholder="' + esc(ph || '예) 105.8') + '" aria-label="' + esc(label || '평수') + ' 제곱미터"><span>m²</span></div>';
+  }
+  document.addEventListener('input', function (e) {
+    var el = e.target, pair = el && el.closest && el.closest('.py-pair'); if (!pair) return;
+    var py = pair.querySelector('[data-py]'), m2 = pair.querySelector('[data-m2]'); if (!py || !m2) return;
+    if (el === py && !pair._sync) m2.value = m2Of(py.value);
+    else if (el === m2) { pair._sync = true; py.value = pyOf(m2.value); py.dispatchEvent(new Event('input', { bubbles: true })); pair._sync = false; }   // 평수 칸이 바뀐 것처럼 (저장 등 그대로)
+  }, true);
+  document.addEventListener('change', function (e) {
+    var el = e.target, pair = el && el.matches && el.matches('[data-m2]') && el.closest('.py-pair'); if (!pair) return;
+    var py = pair.querySelector('[data-py]'); if (py) py.dispatchEvent(new Event('change', { bubbles: true }));
+  }, true);
+
   var KIT = window.AdminKit = {
     inApp: INAPP,
     PhotoPicker: PhotoPicker,
     C: C, DB: DB, I: I, esc: esc, $: $, $$: $$, fmtDate: fmtDate, store: store, ask: ask, toast: toast, notice: notice, listTools: listTools, leave: leave, prevHash: function () { return nav.idx > 0 ? nav.seq[nav.idx - 1] : null; }, replaceTo: replaceTo, setHash: setHash, goBack: goBack, focusNear: focusNear, keepPos: keepPos, flash: flash, copyFlash: copyFlash, progress: progress,
     frame: frame, go: go, setDirty: setDirty, state: state, friendlyError: friendlyError, titleEl: titleEl, routes: {},
     telHref: telHref, siteUrl: siteUrl, copyText: copyText, fmtWhen: fmtWhen, soft: soft, countsOf: countsOf, isNewInq: isNewInq, INQ_ST: INQ_ST, renderSide: renderSide, SHOW_SW: SHOW_SW,
+    m2Of: m2Of, pyOf: pyOf, m2Field: m2Field,
     finder: finder, finderField: finderField, finderSet: finderSet, fdMatch: fdMatch, listCount: listCount,
     blacklistMap: blacklistMap, blacklistOf: blacklistOf, blacklistBanner: blacklistBanner, blacklistWarn: blacklistWarn, blacklistCheck: blacklistCheck, blacklistReset: function () { blCache = null; },
     regionPick: regionPick, splitRegion: splitRegion, joinRegion: joinRegion, siteLabel: siteLabel, fillUnit: fillUnit, workItems: workItems, estTitle: estTitle, ctrTitle: ctrTitle, filterHtml: filterHtml, filterBind: filterBind, filterMatch: filterMatch, filterReset: filterReset, filterActive: filterActive, filterState: filterState, regionOf: regionOf, dateKeys: dateKeys, matchTokens: matchTokens, findTokens: findTokens, bulk: bulk,

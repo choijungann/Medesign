@@ -46,7 +46,7 @@
   /** 저장된 벽 다듬기 → { ar, m, h, src, s } | null */
   function clean(w) {
     if (!w || typeof w !== 'object' || !Array.isArray(w.s)) return null;
-    var out = { ar: r4(num(w.ar, 0.05, 20, 1)), m: Math.round(num(w.m, 1, 300, 12) * 1000) / 1000, h: Math.round(num(w.h, 2, 4, CEIL) * 100) / 100,
+    var out = { ar: r4(num(w.ar, 0.05, 20, 1)), m: Math.round(num(w.m, 1, 300, 12) * 1000) / 1000, h: Math.round(num(w.h, 2, 4, CEIL) * 1000) / 1000,
       src: SRC.indexOf(w.src) >= 0 ? w.src : 'guess', s: [] };
     w.s.forEach(function (g) {
       if (!Array.isArray(g) || out.s.length >= MAX_SEGS) return;
@@ -415,10 +415,14 @@
       case 'col': return [{ w: w, d: w, z0: 0, z1: H - 0.01, wallTone: true }];   // 기둥: 벽과 같은 색
       case 'part': return [{ w: w, d: 0.12, z0: 0, z1: f && f.h ? Math.min(f.h, H - 0.01) : H - 0.01, wallTone: true }];   // 가벽 (높이를 정하면 그 높이까지)
       case 'tv': return [{ w: w, d: 0.45, z0: 0, z1: 0.45 }, { w: Math.min(w * 0.75, 1.9), d: 0.06, z0: 0.62, z1: 0.62 + Math.min(w * 0.75, 1.9) * 0.5625, off: -0.12 }];
-      case 'sofa': return [{ w: w, d: 0.95, z0: 0, z1: 0.42 }, { w: w, d: 0.22, z0: 0, z1: 0.82, off: -0.365 }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: -(w / 2 - 0.1) }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: w / 2 - 0.1 }];
+      case 'sofa': var si = Math.max(0.2, w - 0.4); return [{ w: si, d: 0.73, z0: 0, z1: 0.42, off: 0.11 }, { w: si, d: 0.22, z0: 0, z1: 0.82, off: -0.365 }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: -(w / 2 - 0.1) }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: w / 2 - 0.1 }];   // 앉는 곳·등받이는 팔걸이 사이 (겹친 면이 줄무늬로 보이지 않게)
       case 'table': return [{ w: w, d: w <= 1.2 ? 0.8 : 0.9, z0: 0, z1: 0.75 }];
       case 'desk': return [{ w: w, d: 0.6, z0: 0, z1: 0.75 }];
-      case 'bed': return [{ w: w, d: 2.1, z0: 0, z1: 0.5 }, { w: w, d: 0.08, z0: 0, z1: 1.05, off: -1.01 }];
+      case 'bed':   // 매트리스는 머리판 앞부터 + 머리 쪽 베개 (넓은 침대는 둘, 좁으면 하나 — 2026-10-30, 머리 방향이 보이게)
+        var bp = [{ w: w, d: 2.02, z0: 0, z1: 0.5, off: 0.04 }, { w: w, d: 0.08, z0: 0, z1: 1.05, off: -1.01 }];
+        if (w >= 1.25) { var pw = Math.min(0.68, (w - 0.3) / 2); bp.push({ w: pw, d: 0.4, z0: 0.5, z1: 0.64, off: -0.73, side: -(pw / 2 + 0.06) }, { w: pw, d: 0.4, z0: 0.5, z1: 0.64, off: -0.73, side: pw / 2 + 0.06 }); }
+        else bp.push({ w: Math.max(0.3, Math.min(0.7, w - 0.3)), d: 0.4, z0: 0.5, z1: 0.64, off: -0.73 });
+        return bp;
       case 'closet': return [{ w: w, d: 0.6, z0: 0, z1: Math.max(1.8, H - 0.02) }];
       case 'display': return [{ w: w, d: 0.4, z0: 0, z1: 1.9 }];
       case 'wardrobe': return [{ w: w, d: 0.6, z0: 0, z1: Math.min(2.0, H - 0.05) }];   // 옷장 (천장까지 안 감)
@@ -481,7 +485,7 @@
   }
   /**
    * 카메라 자리에서 본 회색 밑그림 → { w, h, data: RGBA } | null (벽이 없거나 바라보는 쪽이 없으면)
-   * cam = { x, y, tx, ty } (0~1), o = { w, h, ss: 매끄럽게(2 = 2배로 그려 줄임), fov, eye }
+   * cam = { x, y, tx, ty } (0~1), o = { w, h, ss: 매끄럽게(2 = 2배로 그려 줄임), fov, eye: 카메라 높이(m), hz: 수평선 자리(0~1, 기본 0.5) }
    */
   function raster(walls, cam, o) {
     o = o || {};
@@ -489,12 +493,12 @@
     if (!has(wl) || !cam || cam.tx == null || cam.ty == null) return null;
     var ss = Math.max(1, Math.min(3, o.ss | 0 || 1)), OW = o.w || GUIDE_W, OH = o.h || GUIDE_H, w = OW * ss, h = OH * ss;
     var fov = num(o.fov, 30, 110, FOV) * Math.PI / 180, eye = num(o.eye, 0.5, 2, EYE), H = wl.h, m = wl.m, ar = wl.ar;
-    var f = (w / 2) / Math.tan(fov / 2), hc = h / 2;
+    var f = (w / 2) / Math.tan(fov / 2), hc = h * num(o.hz, 0.2, 0.8, 0.5);   // hz: 수평선 자리(위에서 비율) — 카메라 각도 상·하는 위·아래를 더 담음 (수직선은 곧게)
     var cx = cam.x * m, cy = cam.y * ar * m, dx = cam.tx * m - cx, dy = cam.ty * ar * m - cy, dl = Math.hypot(dx, dy);
     if (dl < 1e-6) return null;
     dx /= dl; dy /= dl;
     var rx0 = -dy, ry0 = dx;   // 오른쪽 (도면은 아래쪽이 +y)
-    var F = faces(wl).concat(furnFaces(wl, o.furn)), id = new Int32Array(w * h), col = new Float32Array(w * h * 3);
+    var F = faces(wl).concat(furnFaces(wl, o.furn)), id = new Int32Array(w * h), col = new Float32Array(w * h * 3), dep = new Float32Array(w * h);   // dep: 칸마다 칠한 것의 거리 (더 가까운 것만 덧칠 — 베개처럼 위에 얹은 상자가 아래 상자 윗면에 덮이지 않게)
     var SKY = [248, 249, 250], GL = [222, 231, 240];
     var hits = [];
     for (var i = 0; i < w; i++) {
@@ -516,7 +520,7 @@
         p = y * w + i; var yc = y + 0.5 - hc, c = SKY, idv = -1, z;
         if (yc > 0) { z = eye * f / yc; if (z <= zmax) { var fl = 158 + 34 * Math.min(1, z / 14); c = [fl, fl, fl - 2]; idv = -2; } }
         else if (yc < 0) { z = (H - eye) * f / -yc; if (z <= zmax) { var ce = 240 - 12 * Math.min(1, z / 14); c = [ce, ce, ce]; idv = -3; } }
-        id[p] = idv; col[p * 3] = c[0]; col[p * 3 + 1] = c[1]; col[p * 3 + 2] = c[2];
+        id[p] = idv; col[p * 3] = c[0]; col[p * 3 + 1] = c[1]; col[p * 3 + 2] = c[2]; dep[p] = idv === -1 ? Infinity : z;
       }
       for (var k = 0; k < hits.length; k++) {
         var hk = hits[k], F2 = hk.f, t2 = hk.t;
@@ -526,18 +530,22 @@
         var v = (F2.shine ? 238 : F2.furn && !F2.wallTone ? 196 : 236) * sh, wc = F2.shine ? [v - 6, v - 1, v + 6] : F2.furn && !F2.wallTone ? [v, v - 2, v - 5] : [v, v, v - 1];   // 가구는 조금 어둡고 따뜻한 회색, 거울은 밝은 은빛
         var fill = function (za, zb) {   // 높이 za~zb(미터)를 벽색으로
           var y0 = Math.max(0, Math.ceil(yAt(zb) - 0.5)), y1 = Math.min(h - 1, Math.floor(yAt(za) - 0.5));
-          for (var yy = y0; yy <= y1; yy++) { var pp = yy * w + i; id[pp] = F2.id; col[pp * 3] = wc[0]; col[pp * 3 + 1] = wc[1]; col[pp * 3 + 2] = wc[2]; }
+          for (var yy = y0; yy <= y1; yy++) { var pp = yy * w + i; if (t2 > dep[pp] + 1e-4) continue; dep[pp] = t2; id[pp] = F2.id; col[pp * 3] = wc[0]; col[pp * 3 + 1] = wc[1]; col[pp * 3 + 2] = wc[2]; }
         };
         if (F2.furn && F2.see) {   // 유리(샤워부스): 뒤가 비쳐 보이게 옅은 유리색만 + 테두리 선
           var s0 = Math.max(0, Math.ceil(yAt(F2.z1) - 0.5)), s1 = Math.min(h - 1, Math.floor(yAt(F2.z0) - 0.5));
-          for (var sy2 = s0; sy2 <= s1; sy2++) { var sp = sy2 * w + i; id[sp] = F2.id; for (var c2 = 0; c2 < 3; c2++) col[sp * 3 + c2] = col[sp * 3 + c2] * 0.7 + GL[c2] * 0.3; }
+          for (var sy2 = s0; sy2 <= s1; sy2++) { var sp = sy2 * w + i; if (t2 > dep[sp] + 1e-4) continue; id[sp] = F2.id; for (var c2 = 0; c2 < 3; c2++) col[sp * 3 + c2] = col[sp * 3 + c2] * 0.7 + GL[c2] * 0.3; }
           continue;
         }
         if (F2.furn) {
           if (F2.nx * rx + F2.ny * ry > 0) continue;   // 뒷면은 안 그림 (앞면·윗면이 가림)
           if (F2.z1 < eye && exit[F2.pid] > t2) {   // 윗면: 뒷면 위 모서리 ~ 앞면 위 모서리 사이
             var ty0 = Math.max(0, Math.ceil(hc + (eye - F2.z1) * f / exit[F2.pid] - 0.5)), ty1 = Math.min(h - 1, Math.floor(yAt(F2.z1) - 0.5)), tv = 214 * Math.max(0.75, 1 - Math.min(0.15, t2 / 60));
-            for (var yy3 = ty0; yy3 <= ty1; yy3++) { var p3 = yy3 * w + i; id[p3] = 2e6 + F2.pid; col[p3 * 3] = tv; col[p3 * 3 + 1] = tv - 2; col[p3 * 3 + 2] = tv - 5; }
+            for (var yy3 = ty0; yy3 <= ty1; yy3++) {
+              var p3 = yy3 * w + i, dz3 = (eye - F2.z1) * f / Math.max(1e-6, yy3 + 0.5 - hc);   // 이 줄에서 윗면까지 거리
+              if (dz3 > dep[p3] + 1e-4) continue;   // 더 가까운 것(윗면 위에 얹은 베개 등)이 이미 있음
+              dep[p3] = dz3; id[p3] = 2e6 + F2.pid; col[p3 * 3] = tv; col[p3 * 3 + 1] = tv - 2; col[p3 * 3 + 2] = tv - 5;
+            }
           }
           fill(F2.z0, F2.z1);
         }
@@ -547,7 +555,7 @@
           if (F2.hole[1] < H) fill(F2.hole[1], H);
           if (F2.glass) {   // 유리: 뒤에 보이는 것에 밝은 유리색을 살짝
             var g0 = Math.max(0, Math.ceil(yAt(Math.min(H, F2.hole[1])) - 0.5)), g1 = Math.min(h - 1, Math.floor(yAt(F2.hole[0]) - 0.5));
-            for (var gy = g0; gy <= g1; gy++) { var gp = gy * w + i; for (var ch = 0; ch < 3; ch++) col[gp * 3 + ch] = col[gp * 3 + ch] * 0.6 + GL[ch] * 0.4; }
+            for (var gy = g0; gy <= g1; gy++) { var gp = gy * w + i; if (t2 > dep[gp] + 1e-4) continue; for (var ch = 0; ch < 3; ch++) col[gp * 3 + ch] = col[gp * 3 + ch] * 0.6 + GL[ch] * 0.4; }
           }
         }
       }
