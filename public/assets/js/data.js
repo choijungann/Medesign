@@ -37,7 +37,9 @@
   function renderPaths(images, project) {
     var out = [], add = function (p) { if (p && out.indexOf(p) < 0) out.push(p); };
     (images || []).forEach(function (r) { add(r && r.image_path); add(r && r.plan_path); add(guideOf(r)); });   // guide: 3D 밑그림
-    if (project) add(project.plan_path);
+    if (project) { add(project.plan_path); var doc = project.doc || {}, ok = function (x) { return typeof x === 'string' && /(^|\/)renders\//.test(x) ? x : ''; };
+      (doc.refs || []).forEach(function (r) { add(ok(r && r.path)); });   // 현재 집 사진
+      (doc.items || []).forEach(function (x) { ((x && x.lines) || []).forEach(function (l) { add(ok(l && l.photo)); }); }); }   // 자재 사진
     return out;
   }
   function guideOf(r) { var g = r && r.input && r.input.guide; return typeof g === 'string' && /(^|\/)renders\//.test(g) ? g : ''; }
@@ -358,7 +360,7 @@
     deleteRenderProject: function (id, o) {
       return sb().then(function (c) {
         var get = keepFiles(o) ? Promise.resolve(null) : Promise.all([
-          c.from('render_projects').select('plan_path').eq('id', id).maybeSingle().then(function (r) { return r && r.data; }, function () { return null; }),
+          c.from('render_projects').select('plan_path,doc').eq('id', id).maybeSingle().then(function (r) { return r && r.data; }, function () { return null; }),
           c.from('render_images').select('image_path,plan_path,input').eq('project_id', id).then(function (r) { return (r && r.data) || []; }, function () { return []; }),
         ]);
         return get.then(function (g) {

@@ -2978,6 +2978,42 @@ i.k-o { background: repeating-linear-gradient(90deg, #D97706 0 5px, transparent 
 .rd-guide img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 .rd-guide span { padding: 0 8px 6px; }
 .rd-guide-none { margin: 0 0 14px; font-size: 15px; color: var(--ink-3); }
+/* 가구 위치 */
+.rd-furn-tip { flex-wrap: wrap; }
+.rd-furn-g { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.rd-furn-gl { flex: none; width: 56px; padding-top: 11px; font-size: 14.5px; font-weight: 700; color: var(--ink-3); }
+.rd-furn-g .rd-cam-chips { flex: 1; min-width: 0; }
+@media (max-width: 560px) { .rd-furn-g { flex-direction: column; gap: 4px; } .rd-furn-gl { width: auto; padding-top: 0; } }   /* 휴대폰: 이름은 위에, 단추는 한 줄 끝까지 */
+.rd-furn-tools { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.rd-furn-tools .input { width: 70px; min-height: 40px; }
+.rd-fu polygon { fill: rgba(217, 119, 6, .16); stroke: #B45309; }
+.rd-fu-front { stroke: #B45309; stroke-linecap: round; }
+.rd-fu-arr { stroke: #B45309; stroke-linecap: round; }
+.rd-fah path { fill: #B45309; }
+.rd-fu text { fill: #7C2D12; stroke: #fff; paint-order: stroke; font-weight: 700; text-anchor: middle; font-family: var(--font); }
+.rd-fu.on polygon { fill: rgba(217, 119, 6, .32); }
+.rd-fu-line line { stroke: #B45309; stroke-linecap: round; opacity: .8; }
+.rd-fu-line.on line { opacity: 1; }
+.rd-fu-start { fill: #B45309; }
+.rd-furn-tabs { display: inline-flex; gap: 4px; }
+.rd-furn-tab { min-width: 36px; min-height: 36px; padding: 0 8px; border: 2px solid var(--line-2); border-radius: 10px; background: var(--surface); font: inherit; font-size: 15px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.rd-furn-tab.on { border-color: var(--primary); color: var(--ink); }
+/* 현재 집 사진 */
+.rd-ref-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.rd-ref { display: flex; flex-direction: column; gap: 6px; }
+.rd-ref-img { position: relative; border: 2px solid var(--line); border-radius: 10px; overflow: hidden; background: #F6F7F8; aspect-ratio: 4 / 3; }
+.rd-ref-img img { display: block; width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.rd-ref-x { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .92); color: var(--ink-2); cursor: pointer; box-shadow: 0 1px 3px rgba(0, 0, 0, .18); }
+.rd-ref-x svg, .rd-mph-x svg { width: 18px; height: 18px; }
+.rd-ref .dsel-btn { min-height: 44px; font-size: 15.5px; }
+.rd-refs .hint { margin: 8px 0 0; }
+/* 자재 사진 (세부 줄 색상·상세 칸 옆) */
+.rd-mph { position: relative; flex: none; width: 46px; height: 46px; border: 2px solid var(--line-2); border-radius: 12px; overflow: hidden; background: #F6F7F8; }
+.rd-mph img { display: block; width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.rd-mph-x { position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 0 0 0 8px; background: rgba(255, 255, 255, .92); color: var(--ink-2); cursor: pointer; }
+.rd-mph-x svg { width: 14px; height: 14px; }
+.rd-mph-add { position: relative; }
+.rd-mph-wait { font-size: 14px; color: var(--ink-3); cursor: default; }
 .rd-in-guide { display: block; width: 160px; max-width: 100%; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
 .est-cboxes.rd-views { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }   /* 9칸 3×3 (PC도 3칸) */
 .rd-page .textarea { min-height: 0; }

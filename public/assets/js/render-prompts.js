@@ -55,6 +55,7 @@
   var DETAIL_MAX = 20;      // 공사 항목 하나에서 불러오는 세부 줄 수
   var LINES_MAX = 40;       // 공사 내용 줄 수
   var CUSTOM_MAX = 20;      // 직접 넣는 줄 수
+  var MATS_MAX = 4;         // 자재 사진 (세부 줄마다 하나, 전부 합쳐 4장까지 — 그림 AI에 같이 보냄)
 
   function viewOf(k) { return VIEWS.filter(function (v) { return v.key === k; })[0] || null; }
   function styleOf(k) { return STYLES.filter(function (s) { return s.key === (k || ''); })[0] || STYLES[0]; }
@@ -104,7 +105,7 @@
       var allOff = olds.length ? !olds.some(function (l) { return l.on; }) : !o.on;
       return Object.assign({}, x, { on: olds.length ? x.on : !!o.on, lines: x.lines.map(function (l) {
         var w = ol[l.k];   // 같은 줄: 넣기/빼기와 색상·상세를 그대로
-        return Object.assign({}, l, { on: w ? !!w.on : allOff ? false : l.on }, w && w.note ? { note: w.note } : {});
+        return Object.assign({}, l, { on: w ? !!w.on : allOff ? false : l.on }, w && w.note ? { note: w.note } : {}, w && w.photo ? { photo: w.photo } : {});
       }) });
     });
   }
@@ -134,11 +135,16 @@
       } else if (x.on) lines.push(t(x.name, LINE_MAX));
     });
     lines = lines.concat((doc.custom || []).map(function (c) { return t(c, CUSTOM_LEN); }).filter(Boolean)).slice(0, LINES_MAX);
-    return { size: t(doc.size, 6), lines: lines, style: styleOf(doc.style).key, memo: t(doc.memo, MEMO_MAX) };
+    // 자재 사진 (넣은 세부 줄에 붙인 것만, MATS_MAX장까지): { text: '도배: 실크 벽지 [화이트]', path }
+    var mats = [];
+    (doc.items || []).forEach(function (x) { linesOf(x).forEach(function (l) { if (l.on && l.photo && mats.length < MATS_MAX) mats.push({ text: t(x.name + ': ' + lineText(l), 120), path: l.photo }); }); });
+    var out = { size: t(doc.size, 6), lines: lines, style: styleOf(doc.style).key, memo: t(doc.memo, MEMO_MAX) };
+    mats = matsOf(mats); if (mats.length) out.mats = mats;
+    return out;
   }
   /**
    * 카메라 위치 (관리화면에서 도면을 눌러 찍음) — 도면 그림 안의 비율 0~1
-   * { x, y: 서 있는 곳, tx, ty: 바라보는 곳(없으면 null) } | null
+   * { x, y: 서 있는 곳, tx, ty: 바라보는 곳(없으면 null), ar: 도면 세로/가로(방향을 정확히 재려고, 없으면 1) } | null
    */
   function camOf(c) {
     if (!c || typeof c !== 'object') return null;
@@ -146,23 +152,176 @@
     var o = { x: c.x == null ? null : n(c.x), y: c.y == null ? null : n(c.y), tx: c.tx == null ? null : n(c.tx), ty: c.ty == null ? null : n(c.ty) };
     if (o.x == null || o.y == null) return null;
     if (o.tx == null || o.ty == null || (Math.abs(o.tx - o.x) < 0.01 && Math.abs(o.ty - o.y) < 0.01)) { o.tx = null; o.ty = null; }
+    var ar = Number(c.ar); if (isFinite(ar) && ar >= 0.2 && ar <= 5) o.ar = Math.round(ar * 1000) / 1000;
     return o;
   }
   // AI에게 알려 줄 때: 도면 그림 위의 [y, x] (0~1000, 위·왼쪽부터 — Gemini가 그림 위치를 읽는 방식과 같게)
+  // 방위: 도면 그림 위쪽 = 북쪽 (오른쪽 = 동, 아래 = 남, 왼쪽 = 서)
   var DIRS = ['top', 'top right', 'right', 'bottom right', 'bottom', 'bottom left', 'left', 'top left'];
+  var COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  var COMPASS_KO = ['북', '북동', '동', '남동', '남', '남서', '서', '북서'];
+  function camAngle(c) {   // 바라보는 쪽 (0 = 북(위), 90 = 동(오른쪽), 시계 방향) | null
+    c = camOf(c); if (!c || c.tx == null) return null;
+    var a = Math.atan2(c.tx - c.x, -(c.ty - c.y) * (c.ar || 1)) * 180 / Math.PI;
+    return (a + 360) % 360;
+  }
+  function dirIdx(c) { var a = camAngle(c); return a == null ? -1 : Math.round(a / 45) % 8; }
   /** 바라보는 쪽을 말로: 도면 그림에서 위·오른쪽 위… (위 = 그림의 위쪽, 시계 방향) */
-  function camDir(c) {
-    c = camOf(c); if (!c || c.tx == null) return '';
-    var a = Math.atan2(c.tx - c.x, -(c.ty - c.y)) * 180 / Math.PI;   // 0 = 위, 90 = 오른쪽
-    return DIRS[(Math.round(((a + 360) % 360) / 45)) % 8];
+  function camDir(c) { var i = dirIdx(c); return i < 0 ? '' : DIRS[i]; }
+  /** 바라보는 방위 (관리화면 표시용): '서' | '북동' … | '' */
+  function camDirKo(c) { var i = dirIdx(c); return i < 0 ? '' : COMPASS_KO[i]; }
+  /**
+   * 이 카메라에서 도면의 북·동·남·서쪽이 사진의 어디에 오는지 — 그림 AI는 '서쪽'을 사진의 서쪽(왼쪽)으로 알아들어서,
+   * 방위는 카메라 기준(정면·왼쪽·오른쪽·뒤)으로 바꿔서 전함 (2026-10-30)
+   * → { north: 'straight ahead', east: 'on the right', … } | null
+   */
+  function camSides(c) {
+    var a = camAngle(c); if (a == null) return null;
+    var out = {};
+    [['north', 0], ['east', 90], ['south', 180], ['west', 270]].forEach(function (s) {
+      var d = ((s[1] - a + 540) % 360) - 180, m = Math.abs(d), side = d > 0 ? 'right' : 'left';   // d: 카메라 정면에서 시계 방향으로 몇 도
+      out[s[0]] = m <= 22.5 ? 'straight ahead' : m <= 67.5 ? 'ahead on the ' + side : m <= 112.5 ? 'on the ' + side
+        : m <= 157.5 ? 'behind on the ' + side + ' (mostly out of the photo)' : 'behind the camera (not in the photo)';
+    });
+    return out;
+  }
+  function sidesText(c) {
+    var s = camSides(c); if (!s) return '';
+    return 'the north side of the plan is ' + s.north + ', the east side is ' + s.east + ', the south side is ' + s.south + ', the west side is ' + s.west;
   }
   function camText(c) {
     c = camOf(c); if (!c) return '';
     var pt = function (y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; };
-    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) + ' (that is, toward the ' + camDir(c) + ' of the plan image)' : ', looking in the most natural direction from there');
+    var i = dirIdx(c);
+    return 'camera standing at ' + pt(c.y, c.x) + (c.tx != null ? ', looking toward ' + pt(c.ty, c.tx) + ' (that is, toward the ' + COMPASS[i] + ' of the plan - the ' + DIRS[i] + ' of the plan image)' : ', looking in the most natural direction from there');
   }
-  // 3D 밑그림 파일 (관리화면이 카메라 자리에서 본 회색 그림을 그려 올린 것 — render-walls.js)
+  /* ---------- 가구 위치 (관리화면에서 도면에 놓을 곳 → 앞쪽을 차례로 누름, 2026-10-30) ----------
+     { x, y: 놓은 곳(가운데), tx, ty: 앞쪽(식탁은 긴 쪽이 향하는 곳), ar, w: 가로(m) } — 그림 AI에는 카메라에서 본 자리(정면·왼쪽…)로 바꿔 전함 */
+  var FURN = [
+    // 거실·방
+    { key: 'tv', g: 'room', name: '거실장', en: 'TV stand (a low living-room cabinet with a TV on it)', d: 0.45, w: 2.0, tip: '앞쪽(소파 쪽)' },
+    { key: 'sofa', g: 'room', name: '소파', en: 'sofa', d: 0.95, w: 2.3, tip: '앞쪽(앉아서 보는 쪽)' },
+    { key: 'desk', g: 'room', name: '책상', en: 'desk with a chair', d: 0.6, w: 1.2, tip: '앞쪽(의자 놓는 쪽)' },
+    { key: 'bed', g: 'room', name: '침대', en: 'bed', d: 2.1, w: 1.6, tip: '발 쪽', foot: true },
+    { key: 'closet', g: 'room', name: '붙박이장', en: 'floor-to-ceiling built-in wardrobe', d: 0.6, w: 2.4, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'low', g: 'room', name: '낮은 테이블', en: 'low coffee table', d: 0.6, w: 1.2, axis: true, tip: '긴 쪽이 향할 곳' },
+    { key: 'display', g: 'room', name: '장식장', en: 'display cabinet with glass doors and shelves', d: 0.4, w: 1.2, tip: '앞쪽(문 쪽)' },
+    // 주방 (2026-10-30)
+    { key: 'fridge', g: 'kitchen', name: '냉장고장', en: 'floor-to-ceiling built-in refrigerator cabinet (refrigerator inside)', d: 0.7, w: 1.0, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'range', g: 'kitchen', name: '렌지장', en: 'tall appliance cabinet with a built-in microwave and oven', d: 0.6, w: 0.6, tip: '앞쪽(문 여는 쪽)' },
+    { key: 'base', g: 'kitchen', name: '하부장', en: 'run of kitchen base cabinets with a countertop', d: 0.6, w: 2.4, tip: '앞쪽(서서 쓰는 쪽)', multi: true },
+    { key: 'table', g: 'kitchen', name: '식탁', en: 'dining table with chairs', d: 0.9, w: 1.6, axis: true, tip: '긴 쪽이 향할 곳' },
+    // 욕실 (2026-10-30)
+    { key: 'bath', g: 'bath', name: '욕조', en: 'bathtub', d: 0.75, w: 1.5, tip: '앞쪽(들어가는 쪽)' },
+    { key: 'shower', g: 'bath', name: '샤워부스', en: 'glass shower booth', d: 0.9, w: 0.9, tip: '앞쪽(문 쪽)' },
+    { key: 'toilet', g: 'bath', name: '변기', en: 'toilet', d: 0.7, w: 0.4, tip: '앞쪽(앉는 쪽)' },
+    { key: 'basin', g: 'bath', name: '세면대', en: 'washbasin on a vanity cabinet', d: 0.5, w: 0.8, tip: '앞쪽(쓰는 쪽)' },
+    { key: 'mirror', g: 'bath', name: '거울', en: 'tall wall mirror', d: 0.03, w: 0.6, tip: '앞쪽(비치는 쪽)' },
+    // 구조 (2026-10-30) — 기둥: 한 번만 누름(크기 = 가로), 가벽: 한쪽 끝 → 다른 쪽 끝 (높이를 정할 수 있음, 비우면 천장까지)
+    { key: 'col', g: 'struct', name: '기둥', en: 'structural column (a square pillar from floor to ceiling)', d: 0.4, w: 0.4, nodir: true, multi: true },
+    { key: 'part', g: 'struct', name: '가벽', en: 'partition wall', d: 0.12, w: 1.5, line: true, multi: true },
+  ];
+  var FURN_GROUPS = [{ g: 'room', name: '거실·방' }, { g: 'kitchen', name: '주방' }, { g: 'bath', name: '욕실' }, { g: 'struct', name: '구조' }];
+  var FURN_MULTI = 6;   // 하부장·기둥·가벽은 여러 개 (#2 … #6)
+  function furnDef(k) { return FURN.filter(function (f) { return f.key === String(k).split('#')[0]; })[0] || null; }
+  // 가구 열쇠: 'sofa' 또는 여러 개 놓는 것은 'col', 'col#2' … → { d: 종류, n: 몇 번째 } | null
+  function furnKey(key) {
+    var m = /^([a-z]+)(?:#([2-9]))?$/.exec(String(key || '')), d = m && furnDef(m[1]);
+    if (!d || (m[2] && (!d.multi || +m[2] > FURN_MULTI))) return null;
+    return { d: d, n: m[2] ? +m[2] : 1 };
+  }
+  /** 놓인 가구 열쇠를 종류 순서·번호 순서로 */
+  function furnKeys(f) {
+    return Object.keys(f || {}).filter(function (k) { return furnKey(k); }).sort(function (a, b) {
+      var A = furnKey(a), B = furnKey(b); return FURN.indexOf(A.d) - FURN.indexOf(B.d) || A.n - B.n;
+    });
+  }
+  /**
+   * 가구 위치 다듬기 → { tv: {…}, col: {…}, 'col#2': {…} } (없는 것은 빠짐)
+   * 가벽(line): x, y = 가운데, tx, ty = 한쪽 끝, L = 길이(도면 가로 단위), h = 높이(m, 없으면 천장까지)
+   */
+  function furnOf(f) {
+    var out = {};
+    if (!f || typeof f !== 'object' || Array.isArray(f)) return out;
+    furnKeys(f).forEach(function (key) {
+      var d = furnKey(key).d, src = f[key], c = camOf(src); if (!c) return;
+      var w = Number(src.w); c.w = isFinite(w) && w >= 0.2 && w <= 8 ? Math.round(w * 100) / 100 : d.w;
+      if (d.nodir) { c.tx = null; c.ty = null; }
+      if (d.line) {
+        if (c.tx == null) return;
+        var L = Number(src.L); c.L = isFinite(L) && L > 0.003 && L <= 2 ? Math.round(L * 1e4) / 1e4 : Math.round(Math.hypot(c.tx - c.x, (c.ty - c.y) * (c.ar || 1)) * 2e4) / 1e4;
+        var h = Number(src.h); if (src.h != null && src.h !== '' && isFinite(h) && h >= 0.3 && h <= 4) c.h = Math.round(h * 100) / 100;
+      }
+      out[key] = c;
+    });
+    return out;
+  }
+  function pt1000(y, x) { return '[' + Math.round(y * 1000) + ', ' + Math.round(x * 1000) + ']'; }
+  function furnArt(d) { return d.multi ? 'a ' : 'the '; }
+  function heightTxt(f) { return f.h ? ', ' + f.h + ' m high (not reaching the ceiling)' : ', reaching the ceiling'; }
+  // 가구 하나: 도면 기준 (도면 읽기 AI·전체 조감도용)
+  function furnPlanOne(key, f, scale) {
+    var d = furnDef(key), i = dirIdx(f);
+    if (d.nodir) return furnArt(d) + d.en + ' (' + d.name + ', about ' + f.w + ' m square) at ' + pt1000(f.y, f.x);
+    if (d.line) return furnArt(d) + d.en + ' (' + d.name + ') from ' + pt1000(2 * f.y - f.ty, 2 * f.x - f.tx) + ' to ' + pt1000(f.ty, f.tx) + (scale > 0 ? ', about ' + (Math.round(f.L * scale * 10) / 10) + ' m long' : '') + heightTxt(f);
+    var dir = i < 0 ? '' : d.axis ? ', its long side running ' + (i % 4 === 0 ? 'north-south (top to bottom of the plan image)' : i % 4 === 2 ? 'east-west (left to right of the plan image)' : 'diagonally')
+      : ', its ' + (d.foot ? 'foot end' : 'front') + ' facing ' + COMPASS[i] + ' (the ' + DIRS[i] + ' of the plan image)';
+    return furnArt(d) + d.en + ' (' + d.name + ', about ' + f.w + ' m wide) centred at ' + pt1000(f.y, f.x) + dir;
+  }
+  /** 가구 전부: 도면 기준 한 줄 | '' (scale: 도면 가로 전체 길이 m — 가벽 길이를 쓸 때) */
+  function furnPlan(furn, scale) {
+    furn = furnOf(furn);
+    return furnKeys(furn).map(function (k) { return furnPlanOne(k, furn[k], scale); }).join('; ');
+  }
+  function relDeg(cam, x, y, ar) {   // 카메라 정면에서 시계 방향으로 몇 도(-180~180)에 있는지
+    var a0 = Math.atan2(cam.tx - cam.x, -(cam.ty - cam.y) * ar), a1 = Math.atan2(x - cam.x, -(y - cam.y) * ar);
+    return (((a1 - a0) * 180 / Math.PI) + 540) % 360 - 180;
+  }
+  /**
+   * 이 카메라에서 본 가구 자리 (사진에 보일 만한 것만) → '' | 'the sofa on the left side of the photo, about 3 m from the camera, facing right; …'
+   * scale: 도면 그림 가로 전체의 실제 길이(m — 3D 밑그림 벽 선이 있을 때만, 없으면 거리는 안 씀)
+   */
+  function furnCam(furn, cam, scale) {
+    furn = furnOf(furn); cam = camOf(cam);
+    if (!cam || cam.tx == null) return '';
+    var ar = cam.ar || 1, out = [];
+    var camA = Math.atan2(cam.tx - cam.x, -(cam.ty - cam.y) * ar);
+    var rel = function (x0, y0, x1, y1) { return (((Math.atan2(x1 - x0, -(y1 - y0) * ar) - camA) * 180 / Math.PI) + 540) % 360 - 180; };
+    var axisTxt = function (f) { var q = Math.abs(rel(f.x, f.y, f.tx, f.ty)) % 180; q = Math.min(q, 180 - q); return q < 35 ? 'running away from the camera' : q > 55 ? 'running across the photo (left to right)' : 'set diagonally'; };
+    furnKeys(furn).forEach(function (key) {
+      var d = furnDef(key), f = furn[key];
+      var deg = relDeg(cam, f.x, f.y, ar), m = Math.abs(deg);
+      if (d.line) [[f.tx, f.ty], [2 * f.x - f.tx, 2 * f.y - f.ty]].forEach(function (e) { var dd = relDeg(cam, e[0], e[1], ar); if (Math.abs(dd) < m) { m = Math.abs(dd); deg = dd; } });   // 가벽은 한쪽 끝만 보여도
+      if (m > 70) return;   // 사진 밖(옆·뒤)
+      var side = deg > 0 ? 'right' : 'left';
+      var where = m <= 10 ? 'straight ahead (centre of the photo)' : m <= 22 ? 'ahead, slightly ' + side + ' of centre' : m <= 38 ? 'on the ' + side + ' side of the photo' : 'at the ' + side + ' edge of the photo (partly out of frame)';
+      var dist = scale > 0 ? ', about ' + (Math.round(Math.hypot(f.x - cam.x, (f.y - cam.y) * ar) * scale * 10) / 10) + ' m from the camera' : '';
+      var face = '';
+      if (d.line) face = ', ' + axisTxt(f) + (scale > 0 ? ', about ' + (Math.round(f.L * scale * 10) / 10) + ' m long' : '') + heightTxt(f);
+      else if (d.nodir) face = ', about ' + f.w + ' m square';
+      else if (f.tx != null) {
+        var fd = rel(f.x, f.y, f.tx, f.ty), a = Math.abs(fd);
+        if (d.axis) face = ', its long side ' + axisTxt(f);
+        else if (d.foot) face = a >= 135 ? ', its foot end toward the camera' : a <= 45 ? ', its headboard toward the camera' : ', its foot end pointing ' + (fd > 0 ? 'right' : 'left');
+        else face = a >= 135 ? ', facing the camera' : a <= 45 ? ', facing away from the camera (its back toward the camera)' : ', facing ' + (fd > 0 ? 'right' : 'left');
+      }
+      out.push(furnArt(d) + d.en + ' ' + where + dist + face);
+    });
+    return out.join('; ');
+  }
+  // 3D 밑그림 파일 (관리화면이 카메라 자리에서 본 회색 그림을 그려 올린 것 — render-walls.js) · 현재 집 사진도 같은 모양의 경로
   var GUIDE_RE = /^(u\/)?renders\/[0-9a-f-]{36}\/[\w.-]{1,100}\.jpg$/i;
+  var REFS_MAX = 6;   // 현재 집 사진 (참고용) 최대 장수
+  /** 자재 사진 목록 다듬기 → [{ text, path }] */
+  function matsOf(a) {
+    return (Array.isArray(a) ? a : []).filter(function (m) { return m && typeof m.path === 'string' && GUIDE_RE.test(m.path); })
+      .slice(0, MATS_MAX).map(function (m) { return { text: t(m.text, 120), path: m.path }; });
+  }
+  /** 현재 집 사진 목록 다듬기 → [{ path, view }] (view: 어느 공간 사진인지, '' = 모름) */
+  function refsOf(a) {
+    return (Array.isArray(a) ? a : []).filter(function (r) { return r && typeof r.path === 'string' && GUIDE_RE.test(r.path); })
+      .slice(0, REFS_MAX).map(function (r) { return { path: r.path, view: viewOf(r.view) && r.view !== 'overview' ? r.view : '' }; });
+  }
   /** 서버에서 받은 input 다듬기 (길이·종류 제한) */
   function cleanInput(x) {
     x = x && typeof x === 'object' ? x : {};
@@ -170,6 +329,10 @@
       style: styleOf(x.style).key, memo: t(x.memo, MEMO_MAX) };
     var c = camOf(x.cam); if (c) { out.cam = c; if (x.camMark === true) out.camMark = true; }   // camMark: 도면 그림에 빨간 점·화살표를 그려서 보냄
     if (typeof x.guide === 'string' && GUIDE_RE.test(x.guide)) out.guide = x.guide;               // guide: 3D 밑그림 (그림 AI가 이 구도 그대로 그림)
+    var fu = furnOf(x.furn); if (Object.keys(fu).length) out.furn = fu;                            // furn: 디자이너가 놓은 가구 자리
+    var sc = Number(x.scale); if (isFinite(sc) && sc >= 1 && sc <= 300) out.scale = Math.round(sc * 1000) / 1000;   // scale: 도면 가로 전체 길이(m)
+    var rf = refsOf(x.refs); if (rf.length) out.refs = rf;                                         // refs: 현재 집 사진
+    var mt = matsOf(x.mats); if (mt.length) out.mats = mt;                                         // mats: 자재 사진
     return out;
   }
   /** 공사 내용이 같은지 (평수·공사 줄만 — 예전 내용으로 만든 그림 알아보기) */
@@ -191,7 +354,12 @@
     '- Do not add windows, doors or openings that the plan does not show. Ignore shared areas outside the home (stairs, elevators, corridors) and any title text on the plan.',
     '- Some views come with a camera point fixed by the designer, given as [y, x] on the floor plan image normalized to 0-1000 (y from the top edge, x from the left edge), and often a point it looks toward. For those views the plan image may also show a red dot (where the camera stands), a red arrow and a light red wedge (the viewing direction and field of view). Use exactly that standing point and direction: work out which room the point is in, which walls, openings and furniture zones fall inside the wedge, and describe only what is visible from that spot in that direction (what is straight ahead, what is on the left and right edges of the frame). Say the viewing direction in room terms (e.g. "looking diagonally from the balcony-side corner toward the kitchen island and the louvered partition"). If the point is in a different space than the view name, follow the point. Never ask the image model to draw the red marks.',
     '- Some views also come with a guide image: a plain grey 3D massing render of that exact view (camera position, eye height, lens and direction) built from the plan\'s walls. Pale blue-white areas in it are window glass with daylight outside; see-through holes are doors or openings into the next space. The image model receives that guide instead of the floor plan. For those views, write the prompt as instructions to finish that exact grey scene: say what each visible surface of the guide is and which finish it gets (floor, ceiling, the wall straight ahead, the left and right walls, built-in elements), what the windows and door openings look out to, and where furniture goes relative to those walls (e.g. "sofa against the left wall, facing a TV wall straight ahead"). Do not describe a different viewpoint, and do not move, add or remove walls, doors or windows.',
-    '- Whole-home overview: 3D isometric cutaway from above at about 45 degrees, ceiling removed, every room furnished appropriately, with the same room arrangement as the plan.',
+    '- Compass words: read the plan image with north at the top (east = right edge, south = bottom edge, west = left edge). The designer\'s notes (Korean) may name sides or walls with them (동 east, 서 west, 남 south, 북 north; e.g. 서쪽 벽 = the wall on the west side of that room). Each camera-fixed view comes with a line saying where each side of the plan appears from that camera; use it to place those items in camera terms, and leave out items on a side that is behind the camera. For views without a fixed camera, choose the viewpoint yourself and convert the same way.',
+    '- In every image prompt, describe positions only as seen from the camera (straight ahead, on the left, on the right). Never write compass words (north, east, south, west) or directions of the plan image (top, bottom, left or right of the plan) in a prompt - the image model applies them to the photo itself (it puts "west" on the left of the photo whichever way the camera faces).',
+    '- The designer may fix furniture positions on the plan (living room and bedroom furniture, kitchen cabinets, bathroom fixtures) and add structure (columns, partition walls - a partition wall that does not reach the ceiling is a half-height wall). Put those pieces exactly where given, facing as given, and keep them in the prompt: for camera-fixed views use that view\'s furniture line (already in camera terms); leave out pieces that are not in view. Add other furniture only where it does not clash with them. In a guide image, the darker grey blocks are these pieces.',
+    '- The designer may attach photos of the home as it is now, before remodeling, each labelled with its space. Use them to understand the real structure (window sizes and positions, sill heights, ceiling, beams, columns, door positions, balcony) and describe that structure in the prompt; their finishes, furniture and clutter will all be replaced, so do not describe them. The image model also receives the photos labelled with the view\'s own space.',
+    '- The designer may attach material sample photos (labelled "material sample 1", … with the item they belong to, e.g. 마루: 강마루 → the floor). Describe each sampled material\'s colour, pattern and texture in the prompts for the views where that surface shows. The image model also receives these samples.',
+    '- Whole-home overview: 3D isometric cutaway from above at about 45 degrees, ceiling removed, every room furnished appropriately, with the same room arrangement and orientation as the plan (the top of the plan at the back of the picture, so west stays on the left and east on the right).',
     '- Text in square brackets after an item is the designer\'s color/finish detail for that item (e.g. 실크 벽지 [화이트 무광] → white matte wallpaper; 강마루 [밝은 오크] → light oak flooring). Follow it exactly.',
     '- Use only the finishes from the list that apply to that space, described visually (e.g. 강마루 → light oak engineered wood flooring; 실크 벽지 → smooth matte wallpaper; 우물천장 간접조명 → recessed ceiling tray with hidden LED cove light). Do not invent brand names or built-ins that the list or plan does not suggest; ordinary movable furniture and decor are fine.',
     '- Apply the style and the designer\'s request, unless the request asks for text or anything unrelated to the interior.',
@@ -215,13 +383,18 @@
       linesText(inp),
       'Style: ' + styleOf(inp.style).en,
       'Designer\'s request (Korean, optional): ' + (inp.memo || '(none)'),
+      inp.furn ? 'Furniture and structure placed by the designer on the plan: ' + furnPlan(inp.furn, inp.scale) + '.' : '',
+      inp.refs ? 'Photos of the home as it is now (attached as "current photo 1", "current photo 2", …): ' + inp.refs.map(function (r, i) { var v = viewOf(r.view); return 'current photo ' + (i + 1) + ' = ' + (v ? v.en + ' (' + v.name + ')' : 'space not labelled'); }).join('; ') + '.' : '',
+      inp.mats ? 'Material sample photos (attached as "material sample 1", …): ' + inp.mats.map(function (m, i) { return 'material sample ' + (i + 1) + ' = ' + m.text; }).join('; ') + '.' : '',
       'Views to render:',
       views.map(function (v) {
         var x = viewOf(v.view) || VIEWS[0], c = x.key === 'overview' ? '' : camText(v.cam);
         return '- id ' + v.id + ': ' + x.en + ' (' + x.name + ')' + (c ? ' — designer-fixed ' + c + (v.mark ? ', also drawn on the plan as a red dot, arrow and wedge' : '') : '') +
+          (c && sidesText(v.cam) ? '; from this camera ' + sidesText(v.cam) : '') +
+          (c && inp.furn && v.cam && v.cam.tx != null ? '; designer-placed furniture in view from this camera: ' + (furnCam(inp.furn, v.cam, inp.scale) || 'none') : '') +
           (v.guide && x.key !== 'overview' ? '; its grey 3D guide image is attached as "guide ' + v.id + '"' : '');
       }).join('\n'),
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   /** 도면 읽기 답(JSON) 읽기 → { planOk, byId: { id: { found, caption, prompt } }, list: [같은 것, 답 순서대로] } (못 읽으면 null) */
@@ -263,10 +436,29 @@
   var MARK = 'The red dot, red arrow and light red wedge drawn on the floor plan show where the camera stands and which way it looks: render the view from exactly that spot in that direction, framed by the wedge. They are only markers - never draw them.';
   // 3D 밑그림을 보낼 때 (도면 대신)
   var GUIDE = 'The attached image is a plain grey 3D massing render of this exact space, built from the floor plan and seen from the exact camera position, eye height, lens and direction to use. Turn it into a finished photorealistic interior photograph: keep the camera, perspective and framing exactly the same, and keep every wall, corner, ceiling line, door opening and window opening at exactly the same place and size in the frame - do not add, remove, move or resize walls, doors or windows. Pale blue-white areas are window glass with daylight outside; holes in the walls are door openings or openings into the next space. Replace the grey surfaces with the finishes described, put frames and doors in door openings, and add furniture, lighting and decor that suit the description. Do not draw any text, room labels, dimension lines, logos, watermarks or people.';
-  /** 그림 AI에 보내는 글 (marked: 도면에 빨간 카메라 표시를 그려서 보낼 때, guided: 도면 대신 3D 밑그림을 보낼 때) */
-  function imagePrompt(p, marked, guided) { return String(p || '').trim() + '\n\n' + (guided ? GUIDE : (marked ? MARK + '\n' : '') + FINAL); }
+  // 카메라 방향을 찍은 그림: 방위가 사진의 어디인지 (설명·요청 사항에 동서남북이 남아 있어도 사진의 왼쪽·오른쪽으로 잘못 놓지 않게)
+  function sidesNote(cam) {
+    var t = sidesText(cam);
+    return t ? 'Left and right in this description mean the left and right of the photo as seen from the camera. If the description or the designer\'s notes name plan directions (north 북, east 동, south 남, west 서 - north is the top of the floor plan), they are NOT directions in the photo: from this camera ' + t + '.' : '';
+  }
+  /**
+   * 그림 AI에 보내는 글 (marked: 도면에 빨간 카메라 표시를 그려서 보낼 때, guided: 도면 대신 3D 밑그림을 보낼 때, cam: 그 그림의 카메라)
+   * o = { inp: cleanInput 결과 (가구 자리), overview: 전체 조감도인지, refs: 같이 보내는 현재 집 사진 장수 }
+   */
+  function imagePrompt(p, marked, guided, cam, o) {
+    o = o || {};
+    var sn = sidesNote(cam), inp = o.inp || {}, fn = '';
+    if (inp.furn) {
+      var fc = o.overview ? furnPlan(inp.furn, inp.scale) : furnCam(inp.furn, cam, inp.scale);
+      if (fc) fn = (o.overview ? 'Furniture positions fixed by the designer on the floor plan (keep the plan orientation): ' : 'Furniture fixed by the designer - keep each piece exactly here, as seen from the camera: ') + fc + '.' + (guided && !o.overview ? ' In the guide image these are the darker grey blocks.' : '');
+    }
+    var mn = o.mats && o.mats.length ? 'Images labelled "material sample" are photos of the chosen materials: ' + o.mats.map(function (m, i) { return 'material sample ' + (i + 1) + ' = ' + m; }).join('; ') + '. Use each sample\'s exact colour, pattern and texture for that surface wherever it appears in this view; never show the sample photos themselves.' : '';
+    var many = o.refs > 1, rn = o.refs > 0 ? (many ? 'The ' + o.refs + ' images labelled "current photo" show' : 'The image labelled "current photo" shows') + ' this same space as it is now, before remodeling: use ' + (many ? 'them' : 'it') + ' only for the real structure (window sizes and positions, sill heights, ceiling, beams, door positions), not for finishes, furniture or decor, and never copy ' + (many ? 'their' : 'its') + ' clutter.' : '';
+    return String(p || '').trim() + '\n\n' + [sn, fn, rn, mn].filter(Boolean).map(function (x) { return x + '\n'; }).join('') + (guided ? GUIDE : (marked ? MARK + '\n' : '') + FINAL);
+  }
 
   return { VIEWS: VIEWS, STYLES: STYLES, MAX_VIEWS: MAX_VIEWS, MEMO_MAX: MEMO_MAX, LINE_MAX: LINE_MAX, NOTE_MAX: NOTE_MAX, COLORS: COLORS, FINISHES: FINISHES, CUSTOM_LEN: CUSTOM_LEN, CUSTOM_MAX: CUSTOM_MAX, viewOf: viewOf, styleOf: styleOf,
-    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText, camDir: camDir,
+    fromEstimate: fromEstimate, linesOf: linesOf, lineText: lineText, itemState: itemState, mergeItems: mergeItems, changes: changes, compose: compose, cleanInput: cleanInput, sameContent: sameContent, camOf: camOf, camText: camText, camDir: camDir, camDirKo: camDirKo, camSides: camSides, sidesText: sidesText,
+    FURN: FURN, FURN_GROUPS: FURN_GROUPS, FURN_MULTI: FURN_MULTI, furnDef: furnDef, furnKey: furnKey, furnKeys: furnKeys, furnOf: furnOf, furnPlan: furnPlan, furnCam: furnCam, REFS_MAX: REFS_MAX, refsOf: refsOf, MATS_MAX: MATS_MAX, matsOf: matsOf,
     SYSTEM: SYSTEM, agentText: agentText, parseAgent: parseAgent, fallback: fallback, imagePrompt: imagePrompt };
 });

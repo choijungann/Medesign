@@ -11,7 +11,7 @@
            길이는 '가로 단위'(X = x, Y = y × ar, ar = 도면 세로/가로)로 계산하고, 미터 = 가로 단위 × m (도면 그림 가로 전체의 실제 길이)
    · 저장 모양 (3D 그림 작업 doc.walls):
      { ar, m, h: 천장 높이, src: 크기를 어떻게 정했는지('dims' 도면 치수 | 'size' 평수 | 'guess' 어림 | 'user' 직접), s: [[x1, y1, x2, y2, 종류], …] }
-     종류: w 벽 · d 문 · n 창 · g 큰 창(바닥까지 오는 창·발코니 문) · o 뚫림(벽 없는 통로)
+     종류: w 벽 · d 문 · n 반창(허리 높이부터 오는 창) · g 전체창(바닥부터 오는 창·발코니 문) · o 뚫림(벽 없는 통로)
    ===================================================================== */
 (function (root, factory) {
   var api = factory();
@@ -23,8 +23,8 @@
   var KINDS = [
     { k: 'w', name: '벽', color: '#2563EB' },
     { k: 'd', name: '문', color: '#16A34A' },
-    { k: 'n', name: '창', color: '#0891B2' },
-    { k: 'g', name: '큰 창', color: '#9333EA' },
+    { k: 'n', name: '반창', color: '#0891B2' },     // 창턱 0.9m ~ 2.1m
+    { k: 'g', name: '전체창', color: '#9333EA' },   // 바닥 ~ 2.2m
     { k: 'o', name: '뚫림', color: '#D97706' },
   ];
   var KIND = {}; KINDS.forEach(function (x) { KIND[x.k] = x; });
@@ -406,6 +406,60 @@
     return F;
   }
   /**
+   * 가구 → 회색 상자들 (가구마다 몇 개의 상자: 소파 = 앉는 곳 + 등받이 + 팔걸이, 거실장 = 장 + TV, 침대 = 매트리스 + 머리판…)
+   * 상자 = { w: 가로, d: 깊이, z0, z1: 높이(m), off: 앞뒤로 옮김(+ = 앞), side: 옆으로 옮김(+ = 오른쪽) }
+   */
+  function furnParts(k, w, H, f) {
+    switch (k) {
+      case 'low': return [{ w: w, d: 0.6, z0: 0, z1: 0.4 }];
+      case 'col': return [{ w: w, d: w, z0: 0, z1: H - 0.01, wallTone: true }];   // 기둥: 벽과 같은 색
+      case 'part': return [{ w: w, d: 0.12, z0: 0, z1: f && f.h ? Math.min(f.h, H - 0.01) : H - 0.01, wallTone: true }];   // 가벽 (높이를 정하면 그 높이까지)
+      case 'tv': return [{ w: w, d: 0.45, z0: 0, z1: 0.45 }, { w: Math.min(w * 0.75, 1.9), d: 0.06, z0: 0.62, z1: 0.62 + Math.min(w * 0.75, 1.9) * 0.5625, off: -0.12 }];
+      case 'sofa': return [{ w: w, d: 0.95, z0: 0, z1: 0.42 }, { w: w, d: 0.22, z0: 0, z1: 0.82, off: -0.365 }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: -(w / 2 - 0.1) }, { w: 0.2, d: 0.95, z0: 0, z1: 0.6, side: w / 2 - 0.1 }];
+      case 'table': return [{ w: w, d: w <= 1.2 ? 0.8 : 0.9, z0: 0, z1: 0.75 }];
+      case 'desk': return [{ w: w, d: 0.6, z0: 0, z1: 0.75 }];
+      case 'bed': return [{ w: w, d: 2.1, z0: 0, z1: 0.5 }, { w: w, d: 0.08, z0: 0, z1: 1.05, off: -1.01 }];
+      case 'closet': return [{ w: w, d: 0.6, z0: 0, z1: Math.max(1.8, H - 0.02) }];
+      case 'display': return [{ w: w, d: 0.4, z0: 0, z1: 1.9 }];
+      case 'fridge': return [{ w: w, d: 0.7, z0: 0, z1: Math.max(1.8, H - 0.02) }];   // 천장까지
+      case 'range': return [{ w: w, d: 0.6, z0: 0, z1: Math.max(1.8, H - 0.02) }];
+      case 'base': return [{ w: w, d: 0.6, z0: 0, z1: 0.85 }];   // 하부장 + 상판 높이
+      case 'bath': return [{ w: w, d: 0.75, z0: 0, z1: 0.55 }];
+      case 'shower': return [{ w: w, d: 0.9, z0: 0, z1: 0.05 }, { w: w, d: 0.9, z0: 0.05, z1: Math.min(2.0, H - 0.05), glass: true }];   // 바닥판 + 유리 칸막이
+      case 'toilet': return [{ w: Math.max(0.38, w), d: 0.2, z0: 0, z1: 0.78, off: -0.25 }, { w: Math.max(0.36, w - 0.04), d: 0.5, z0: 0, z1: 0.42, off: 0.1 }];   // 물탱크 + 앉는 곳
+      case 'basin': return [{ w: w, d: 0.5, z0: 0, z1: 0.85 }];   // 하부장 (거울은 '거울'로 따로)
+      case 'mirror': return [{ w: w, d: 0.03, z0: 0.3, z1: Math.min(2.0, H - 0.1), shine: true }];   // 벽에 붙는 큰 거울 (세면대 앞이면 아래는 하부장에 가려짐)
+      default: return [];
+    }
+  }
+  // 가구 상자의 세로 면들 (미터) — 면마다 따로 id (모서리마다 선이 보이게), 벽보다 조금 어둡게
+  function furnFaces(wl, furn) {
+    var m = wl.m, ar = wl.ar, F = [], id = 1e6, pid = 0, LX = 0.48, LY = 0.88;
+    (Array.isArray(furn) ? furn : []).forEach(function (f) {
+      if (!f || !isFinite(f.x) || !isFinite(f.y)) return;
+      var cx = f.x * m, cy = f.y * ar * m, fx = 0, fy = 1, wd = num(f.w, 0.2, 8, 1.5);
+      if (f.tx != null && f.ty != null) { var dx = f.tx * m - cx, dy = f.ty * ar * m - cy, L = Math.hypot(dx, dy); if (L > 1e-6) { fx = dx / L; fy = dy / L; } }
+      if (f.line || f.axis) {   // 가벽·식탁: (tx, ty)가 가리키는 쪽이 긴 쪽(가로) 방향, 앞쪽은 그와 직각
+        var lx = fx, ly = fy; fx = ly; fy = -lx;
+        if (f.line) wd = Math.max(0.05, num(f.L, 0, 2, 0) * m);
+      }
+      var rx = -fy, ry = fx;   // 오른쪽 (앞을 보고 섰을 때)
+      furnParts(f.k, wd, wl.h, f).forEach(function (pt) {
+        pid++;
+        var ox = cx + fx * (pt.off || 0) + rx * (pt.side || 0), oy = cy + fy * (pt.off || 0) + ry * (pt.side || 0), hw = pt.w / 2, hd = pt.d / 2;
+        var P = function (a, b) { return [ox + rx * a + fx * b, oy + ry * a + fy * b]; };
+        var c = [P(-hw, hd), P(hw, hd), P(hw, -hd), P(-hw, -hd)];   // 앞왼 · 앞오 · 뒤오 · 뒤왼
+        for (var i = 0; i < 4; i++) {
+          var a = c[i], b = c[(i + 1) % 4], ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey);
+          if (L < 1e-6) continue;
+          var nx = ey / L, ny = -ex / L;
+          F.push({ x: a[0], y: a[1], ex: ex, ey: ey, nx: nx, ny: ny, hole: null, glass: false, id: ++id, lit: nx * LX + ny * LY, z0: pt.z0, z1: pt.z1, furn: true, pid: pid, see: !!pt.glass, shine: !!pt.shine, wallTone: !!pt.wallTone });
+        }
+      });
+    });
+    return F;
+  }
+  /**
    * 카메라 자리에서 본 회색 밑그림 → { w, h, data: RGBA } | null (벽이 없거나 바라보는 쪽이 없으면)
    * cam = { x, y, tx, ty } (0~1), o = { w, h, ss: 매끄럽게(2 = 2배로 그려 줄임), fov, eye }
    */
@@ -420,7 +474,7 @@
     if (dl < 1e-6) return null;
     dx /= dl; dy /= dl;
     var rx0 = -dy, ry0 = dx;   // 오른쪽 (도면은 아래쪽이 +y)
-    var F = faces(wl), id = new Int32Array(w * h), col = new Float32Array(w * h * 3);
+    var F = faces(wl).concat(furnFaces(wl, o.furn)), id = new Int32Array(w * h), col = new Float32Array(w * h * 3);
     var SKY = [248, 249, 250], GL = [222, 231, 240];
     var hits = [];
     for (var i = 0; i < w; i++) {
@@ -433,6 +487,9 @@
         if (t > 0.03 && s >= 0 && s <= 1) hits.push({ t: t, f: fc });
       }
       hits.sort(function (a, b) { return b.t - a.t; });
+      // 가구 상자: 광선이 빠져나가는 거리(뒷면) — 윗면을 앞면부터 뒷면까지 칠하려고
+      var exit = {};
+      for (var hx = 0; hx < hits.length; hx++) { var hf = hits[hx].f; if (hf.furn && !hf.see && hf.nx * rx + hf.ny * ry > 0) exit[hf.pid] = Math.max(exit[hf.pid] || 0, hits[hx].t); }
       var zmax = hits.length ? hits[0].t : 0, y, p;
       // 바깥(하늘) → 바닥·천장 (가장 먼 벽까지만) → 벽 (먼 것부터)
       for (y = 0; y < h; y++) {
@@ -446,12 +503,25 @@
         var yAt = function (Z) { return hc - (Z - eye) * f / t2; };
         var facing = Math.abs(F2.nx * rx + F2.ny * ry) / rl;
         var sh = Math.max(0.55, Math.min(1, 0.70 + 0.16 * facing + 0.09 * F2.lit - Math.min(0.12, t2 / 60)));
-        var v = 236 * sh, wc = [v, v, v - 1];
+        var v = (F2.shine ? 238 : F2.furn && !F2.wallTone ? 196 : 236) * sh, wc = F2.shine ? [v - 6, v - 1, v + 6] : F2.furn && !F2.wallTone ? [v, v - 2, v - 5] : [v, v, v - 1];   // 가구는 조금 어둡고 따뜻한 회색, 거울은 밝은 은빛
         var fill = function (za, zb) {   // 높이 za~zb(미터)를 벽색으로
           var y0 = Math.max(0, Math.ceil(yAt(zb) - 0.5)), y1 = Math.min(h - 1, Math.floor(yAt(za) - 0.5));
           for (var yy = y0; yy <= y1; yy++) { var pp = yy * w + i; id[pp] = F2.id; col[pp * 3] = wc[0]; col[pp * 3 + 1] = wc[1]; col[pp * 3 + 2] = wc[2]; }
         };
-        if (!F2.hole) fill(0, H);
+        if (F2.furn && F2.see) {   // 유리(샤워부스): 뒤가 비쳐 보이게 옅은 유리색만 + 테두리 선
+          var s0 = Math.max(0, Math.ceil(yAt(F2.z1) - 0.5)), s1 = Math.min(h - 1, Math.floor(yAt(F2.z0) - 0.5));
+          for (var sy2 = s0; sy2 <= s1; sy2++) { var sp = sy2 * w + i; id[sp] = F2.id; for (var c2 = 0; c2 < 3; c2++) col[sp * 3 + c2] = col[sp * 3 + c2] * 0.7 + GL[c2] * 0.3; }
+          continue;
+        }
+        if (F2.furn) {
+          if (F2.nx * rx + F2.ny * ry > 0) continue;   // 뒷면은 안 그림 (앞면·윗면이 가림)
+          if (F2.z1 < eye && exit[F2.pid] > t2) {   // 윗면: 뒷면 위 모서리 ~ 앞면 위 모서리 사이
+            var ty0 = Math.max(0, Math.ceil(hc + (eye - F2.z1) * f / exit[F2.pid] - 0.5)), ty1 = Math.min(h - 1, Math.floor(yAt(F2.z1) - 0.5)), tv = 214 * Math.max(0.75, 1 - Math.min(0.15, t2 / 60));
+            for (var yy3 = ty0; yy3 <= ty1; yy3++) { var p3 = yy3 * w + i; id[p3] = 2e6 + F2.pid; col[p3 * 3] = tv; col[p3 * 3 + 1] = tv - 2; col[p3 * 3 + 2] = tv - 5; }
+          }
+          fill(F2.z0, F2.z1);
+        }
+        else if (!F2.hole) fill(0, H);
         else {
           if (F2.hole[0] > 0) fill(0, F2.hole[0]);
           if (F2.hole[1] < H) fill(F2.hole[1], H);
